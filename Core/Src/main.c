@@ -92,6 +92,7 @@ CAN_TxHeaderTypeDef TxHeader; // Header containing the information of the transm
 CAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
 
 uint8_t TxData[8] = {0}; // Buffer of the data to send (8 bytes data)
+uint8_t WatchDogTxData[8] = {1}; // Random Buffer data to simulate messages for Watchdog
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
@@ -149,7 +150,7 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
  uint8_t chargerError = 0;
 
  // Creates int to determine if we are charging or not
- uint8_t isCharging = 1;
+ uint8_t isCharging = 0;
 
 
 /* USER CODE END PV */
@@ -546,28 +547,28 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 // Callback function for data received on FIFO0
-//void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-//{
-//
-//	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-//	{
-//		// Reception Error; error thrown if the receive fails
-//		Error_Handler();
-//	}
-//
-////    CAN_RxHeaderTypeDef RxHeader;
-////    uint8_t RxData[8];
-//
-//
-//    // Determine standard vs extended CAN ID - NEW
-//	uint32_t rx_id;
-//	if (RxHeader.IDE == CAN_ID_STD) {
-//		rx_id = RxHeader.StdId;
-//	} else {
-//		rx_id = RxHeader.ExtId;
-//	}
-//
-//    // Display the CAN message to the serial monitor
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+
+	if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+	{
+		// Reception Error; error thrown if the receive fails
+		Error_Handler();
+	}
+
+//    CAN_RxHeaderTypeDef RxHeader;
+//    uint8_t RxData[8];
+
+
+    // Determine standard vs extended CAN ID - NEW
+	uint32_t rx_id;
+	if (RxHeader.IDE == CAN_ID_STD) {
+		rx_id = RxHeader.StdId;
+	} else {
+		rx_id = RxHeader.ExtId;
+	}
+
+    // Display the CAN message to the serial monitor
 //    if(DISPLAY_CAN_MESSAGE){
 //
 //    	// Change Print syntax based on standard vs. extended
@@ -583,96 +584,96 @@ static void MX_GPIO_Init(void)
 //
 //		printf("\r\n");
 //    }
-//
-//    // Based on the CAN ID, determines what ECU sent the message, and update the time that
-//    // the ECU sent it's message, as well as resetting any error
-//    switch(rx_id)
-//    {
-//    	// CAN Heartbeat message
-////        case 0x023:
-////            lastHeartBeatMessage = HAL_GetTick();
-////            heartBeatError = 0;
-////            break;
-//
-//        // TEM Message
-//        case 0x080:
-//        	lastTemMessage = HAL_GetTick();
-//			temError = 0;
-//			break;
-//
-//		// AMS Message
-//        case 0x7E3:
-//        	lastAmsMessage = HAL_GetTick();
-//			amsError = 0;
-//
-//			// Check to see if charging
-//			if(RxData[0] == 0xFF){
-//				isCharging = 1;
+
+    // Based on the CAN ID, determines what ECU sent the message, and update the time that
+    // the ECU sent it's message, as well as resetting any error
+    switch(rx_id)
+    {
+    	// CAN Heartbeat message
+//        case 0x023:
+//            lastHeartBeatMessage = HAL_GetTick();
+//            heartBeatError = 0;
+//            break;
+
+        // TEM Message
+        case 0x080:
+        	lastTemMessage = HAL_GetTick();
+			temError = 0;
+			break;
+
+		// AMS Message
+        case 0x7E3:
+        	lastAmsMessage = HAL_GetTick();
+			amsError = 0;
+
+			// Check to see if charging
+			if(RxData[0] == 0xFF){
+				isCharging = 1;
 //				if(DISPLAY_CAN_ERRORS){
 //					if(RxData[1] != 0x00){
 //						printf("AMS CAN Charging Message is Corrupt.\r\n");
 //						fflush(stdout);
 //					}
 //				}
-//			}
-//			else if(RxData[0] == 0x00){
-//				isCharging = 0;
+			}
+			else if(RxData[0] == 0x00){
+				isCharging = 0;
 //				if(DISPLAY_CAN_ERRORS){
 //					if(RxData[1] != 0xFF){
 //						printf("AMS CAN Charging Message is Corrupt.\r\n");
 //						fflush(stdout);
 //					}
 //				}
-//			}
-//			break;
-//
-//		// MC Message
-//        case 0x41A:
-//        	lastMcMessage = HAL_GetTick();
-//			mcError = 0;
-//			break;
-//
-//		// Charger Message - UPDATE
-//		case 0x18FF50E5:
-//			lastChargerMessage = HAL_GetTick();
-//			chargerError = 0;
-//			break;
-//
-//    }
-//}
+			}
+			break;
+
+		// MC Message
+        case 0x41A:
+        	lastMcMessage = HAL_GetTick();
+			mcError = 0;
+			break;
+
+		// Charger Message - UPDATE
+		case 0x18FF50E5:
+			lastChargerMessage = HAL_GetTick();
+			chargerError = 0;
+			break;
+
+    }
+}
 
 
 // CAN Transmit Function
-//HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint8_t length)
-//{
-////    CAN_TxHeaderTypeDef TxHeader;
-////    uint32_t TxMailbox;
-//
-//    TxHeader.StdId = id;
-//    TxHeader.ExtId = 0;
-//    TxHeader.IDE   = CAN_ID_STD;
-//    TxHeader.RTR   = CAN_RTR_DATA;
-//    TxHeader.DLC   = length;
-//    TxHeader.TransmitGlobalTime = DISABLE;
-//
-//    return HAL_CAN_AddTxMessage(&hcan, &TxHeader, data, &TxMailbox);
-//}
+HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint8_t length)
+{
+//    CAN_TxHeaderTypeDef TxHeader;
+//    uint32_t TxMailbox;
+
+    TxHeader.StdId = id;
+    TxHeader.ExtId = 0;
+    TxHeader.IDE   = CAN_ID_STD;
+    TxHeader.RTR   = CAN_RTR_DATA;
+    TxHeader.DLC   = length;
+    TxHeader.TransmitGlobalTime = DISABLE;
+
+    return HAL_CAN_AddTxMessage(&hcan, &TxHeader, data, &TxMailbox);
+}
 
 // Function to check if a certain message was received over the last half second
-//uint8_t lastMessageSent(uint32_t lastMessage){
-//	if ((HAL_GetTick() - lastMessage) >= 3000) {
-//		return 1;
-//	}
-//	return 0;
-//}
+uint8_t lastMessageSent(uint32_t lastMessage){
+	if ((HAL_GetTick() - lastMessage) >= 3000) {
+		return 1;
+	}
+	return 0;
+}
 
 
 // Function to override print
-//int _write(int file, char *ptr, int len)
-//{
-//    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-//    return len;
-//}
+int _write(int file, char *ptr, int len)
+{
+    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 
 /* USER CODE END 4 */
 
@@ -859,39 +860,42 @@ void StartCANWatchdog(void *argument)
   {
 
 	  // Send CAN Heartbeat message
-//	 CAN_Send(0x123, TxData, 8);
+	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
+
 
 	 // Throw a lil delay to let the CAN message go thru
-//	 osDelay(50);
-//
-//	 // Check if each message has been received over the past half second
-////	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
-//	 temError = lastMessageSent(lastTemMessage);
-//	 amsError = lastMessageSent(lastAmsMessage);
-//	 mcError = lastMessageSent(lastMcMessage);
-//
-//	 // If charging enabled, also check for charger
-//	 if(isCharging)
-//	 {
-//		 chargerError = lastMessageSent(lastChargerMessage);
-//	 }
-//	 else{
-//		 chargerError = 0;
-//	 }
-//
-//
-//	 // If any of the error flags are high, Shut the relay down
-//	 if(temError + amsError + mcError + chargerError)
-//	 {
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET); // This turns the LED on
-//		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
-//	 }
-//	 else
-//	 {
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // This turns the LED off
-//		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
-//
-//		 // Displays to the console any errors
+	 osDelay(50);
+
+	 // Check if each message has been received over the past half second
+//	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
+	 temError = lastMessageSent(lastTemMessage);
+	 amsError = lastMessageSent(lastAmsMessage);
+	 mcError = lastMessageSent(lastMcMessage);
+
+	 // If charging enabled, also check for charger
+	 if(isCharging)
+	 {
+		 chargerError = lastMessageSent(lastChargerMessage);
+	 }
+	 else{
+		 chargerError = 0;
+	 }
+
+
+	 // If any of the error flags are high, Shut the relay down
+	 if(temError + amsError + mcError + chargerError)
+	 {
+		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET); // This turns the LED on
+		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+	 }
+	 else
+	 {
+		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // This turns the LED off
+		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
+
+		 // Displays to the console any errors
 //		 if(DISPLAY_CAN_ERRORS)
 //		 {
 ////			 if(heartBeatError)
@@ -920,9 +924,9 @@ void StartCANWatchdog(void *argument)
 //				 fflush(stdout);
 //		 	 }
 //	 	 }
-//   	 }
-//
-    osDelay(1000);
+   	 }
+
+    osDelay(700);
   }
   /* USER CODE END StartCANWatchdog */
 }
