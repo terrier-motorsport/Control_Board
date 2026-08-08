@@ -561,12 +561,38 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 
 
     // Determine standard vs extended CAN ID - NEW
-	uint32_t rx_id;
+	uint32_t rx_id; // Message ID of received data
 	if (RxHeader.IDE == CAN_ID_STD) {
-		rx_id = RxHeader.StdId;
+		rx_id = RxHeader.StdId; // Stores CAN ID of standard CAN message
 	} else {
-		rx_id = RxHeader.ExtId;
+		rx_id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
 	}
+
+
+//	printf("CAN Message: %08X\r\n	", rx_id);
+
+	uint8_t CANBufferLengthUsed = 0;
+
+	//snprintf returns the # of characters written
+//		printf("CAN Message: %08X	", Rx_Id);
+
+	CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", rx_id); // Appends CAN ID to CANBuffer
+
+	for (int i = 0; i < 8; i++)
+	{
+		// Prints received CAN data as 2 digit hex on new lines
+		// Appends each new data on next empty CANBuffer spot
+		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
+	}
+	CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
+
+//	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
+//	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
+
+
+	// Sends CANBuffer over UART
+	HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
+
 
     // Display the CAN message to the serial monitor
 //    if(DISPLAY_CAN_MESSAGE){
@@ -802,6 +828,7 @@ void DisplayData(void *argument)
 		uint8_t CANBufferLengthUsed = 0;
 
 		//snprintf returns the # of characters written
+//		printf("CAN Message: %08X	", Rx_Id);
 
 		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
 
