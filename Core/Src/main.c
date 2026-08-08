@@ -809,6 +809,10 @@ void DisplayData(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  /////////////////////////////////////////////////////////////////////////////
+	  /////////// This code can be ignored for now, it seems /////////////////////
+	  /////////// to not work. Most likely because of the ///////////////////////
+	  ///////////////////// CAN interrupt //////////////////////////////////////
 
 	if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
 	{
