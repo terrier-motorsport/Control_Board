@@ -124,7 +124,7 @@ float PedalDeadband = 0.15; // Percent deadband of pedal
 
 uint32_t lastThrottleOrBrake = 0; // Gets the time at which a throttle or break CAN message is sent
 
-float inputPedalVoltage; // voltage that the APPS is outputting to the STM
+float inputPedalVoltage = 0; // voltage that the APPS is outputting to the STM
 char msg[20];
 char CANBuffer[100]; // Buffer used to display CAN messages on terminal
 uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
@@ -376,7 +376,7 @@ static void MX_ADC1_Init(void)
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
-  sConfig.SamplingTime = ADC_SAMPLETIME_601CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -450,10 +450,10 @@ static void MX_CAN_Init(void)
 
 
     // Activate CAN RX notifications on FIFO0
-//    if (HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
-//    {
-//  	  Error_Handler();
-//    }
+    if (HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+    {
+  	  Error_Handler();
+    }
 
   /* USER CODE END CAN_Init 2 */
 
@@ -699,10 +699,10 @@ void ControlPedal(void *argument)
 
 //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  }
-	  else
-	  {
-		  	inputPedalVoltage = 1.5;
-	  }
+//	  else
+//	  {
+//		  	inputPedalVoltage = 1.5;
+//	  }
 //	  else
 //	  {
 //		  sprintf(msg, "ADC Timeout\r\n");
