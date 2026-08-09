@@ -788,6 +788,7 @@ void DisplayData(void *argument)
 	  /////////// This code can be ignored for now ///////////////////////////////
 	  ///////////////////////////////////////////////////////////////////////////
 
+
 //	if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
 //	{
 //		if (HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)

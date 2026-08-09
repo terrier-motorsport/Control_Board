@@ -10,7 +10,7 @@
 ../Core/Src/main.c:673:5:_write	1
 ../Core/Src/main.c:688:6:ControlPedal	8
 ../Core/Src/main.c:781:6:DisplayData	1
-../Core/Src/main.c:843:6:StartAPPSCalibration	1
-../Core/Src/main.c:861:6:StartCANWatchdog	7
-../Core/Src/main.c:948:6:HAL_TIM_PeriodElapsedCallback	2
-../Core/Src/main.c:966:6:Error_Handler	1
+../Core/Src/main.c:842:6:StartAPPSCalibration	1
+../Core/Src/main.c:860:6:StartCANWatchdog	7
+../Core/Src/main.c:947:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:965:6:Error_Handler	1
