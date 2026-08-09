@@ -37,8 +37,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define DISPLAY_CAN_MESSAGE 0			// Turn this on/off if you want to print/ignore raw CAN Messages
-#define DISPLAY_CAN_ERRORS 0			// Turn this on/off if you want to print/ignore CAN Errors
+#define DISPLAY_CAN_MESSAGE 1			// Turn this on/off if you want to print/ignore raw CAN Messages
+#define DISPLAY_CAN_ERRORS 1			// Turn this on/off if you want to print/ignore CAN Errors
 
 // Pedal Calibration Inversion Constants
 #define  InvertAnalogOnePedal 0 // Swap the max and min pedal voltages on analog line one
@@ -569,47 +569,22 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 	}
 
 
-//	printf("CAN Message: %08X\r\n	", rx_id);
-
-	uint8_t CANBufferLengthUsed = 0;
-
-	//snprintf returns the # of characters written
-//		printf("CAN Message: %08X	", Rx_Id);
-
-	CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", rx_id); // Appends CAN ID to CANBuffer
-
-	for (int i = 0; i < 8; i++)
-	{
-		// Prints received CAN data as 2 digit hex on new lines
-		// Appends each new data on next empty CANBuffer spot
-		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
-	}
-	CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
-
-//	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
-//	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
-
-
-	// Sends CANBuffer over UART
-	HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
-
-
     // Display the CAN message to the serial monitor
-//    if(DISPLAY_CAN_MESSAGE){
-//
-//    	// Change Print syntax based on standard vs. extended
-//    	if (RxHeader.IDE == CAN_ID_STD){
-//    		printf("RX STD ID: 0x%03lX | Data:", rx_id);
-//    	}
-//		else{
-//			printf("RX EXT ID: 0x%08lX | Data:", rx_id);
-//		}
-//
-//		for (int i = 0; i < RxHeader.DLC; i++)
-//			printf(" %02X", RxData[i]);
-//
-//		printf("\r\n");
-//    }
+    if(DISPLAY_CAN_MESSAGE){
+
+    	// Change Print syntax based on standard vs. extended
+    	if (RxHeader.IDE == CAN_ID_STD){
+    		printf("RX STD ID: 0x%03lX | Data:", rx_id);
+    	}
+		else{
+			printf("RX EXT ID: 0x%08lX | Data:", rx_id);
+		}
+
+		for (int i = 0; i < RxHeader.DLC; i++)
+			printf(" %02X", RxData[i]);
+
+		printf("\r\n");
+    }
 
     // Based on the CAN ID, determines what ECU sent the message, and update the time that
     // the ECU sent it's message, as well as resetting any error
@@ -635,21 +610,21 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 			// Check to see if charging
 			if(RxData[0] == 0xFF){
 				isCharging = 1;
-//				if(DISPLAY_CAN_ERRORS){
-//					if(RxData[1] != 0x00){
-//						printf("AMS CAN Charging Message is Corrupt.\r\n");
-//						fflush(stdout);
-//					}
-//				}
+				if(DISPLAY_CAN_ERRORS){
+					if(RxData[1] != 0x00){
+						printf("AMS CAN Charging Message is Corrupt.\r\n");
+						fflush(stdout);
+					}
+				}
 			}
 			else if(RxData[0] == 0x00){
 				isCharging = 0;
-//				if(DISPLAY_CAN_ERRORS){
-//					if(RxData[1] != 0xFF){
-//						printf("AMS CAN Charging Message is Corrupt.\r\n");
-//						fflush(stdout);
-//					}
-//				}
+				if(DISPLAY_CAN_ERRORS){
+					if(RxData[1] != 0xFF){
+						printf("AMS CAN Charging Message is Corrupt.\r\n");
+						fflush(stdout);
+					}
+				}
 			}
 			break;
 
@@ -814,44 +789,44 @@ void DisplayData(void *argument)
 	  /////////// to not work. Most likely because of the ///////////////////////
 	  ///////////////////// CAN interrupt //////////////////////////////////////
 
-	if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
-	{
-		if (HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-			{
-				Error_Handler();
-			}
-
-		uint16_t Rx_Id; // Message ID of received data
-
-		if (RxHeader.IDE == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
-			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
-		} else {
-			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
-		}
-
-		uint8_t CANBufferLengthUsed = 0;
-
-		//snprintf returns the # of characters written
-//		printf("CAN Message: %08X	", Rx_Id);
-
-		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
-
-		for (int i = 0; i < 8; i++)
-		{
-			// Prints received CAN data as 2 digit hex on new lines
-			// Appends each new data on next empty CANBuffer spot
-			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
-		}
-		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
-
-//	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
-//	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
-
-
-		// Sends CANBuffer over UART
-		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
-
-	}
+//	if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
+//	{
+//		if (HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+//			{
+//				Error_Handler();
+//			}
+//
+//		uint16_t Rx_Id; // Message ID of received data
+//
+//		if (RxHeader.IDE == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
+//			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
+//		} else {
+//			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
+//		}
+//
+//		uint8_t CANBufferLengthUsed = 0;
+//
+//		//snprintf returns the # of characters written
+////		printf("CAN Message: %08X	", Rx_Id);
+//
+//		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
+//
+//		for (int i = 0; i < 8; i++)
+//		{
+//			// Prints received CAN data as 2 digit hex on new lines
+//			// Appends each new data on next empty CANBuffer spot
+//			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
+//		}
+//		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
+//
+////	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
+////	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
+//
+//
+//		// Sends CANBuffer over UART
+//		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
+//
+//	}
 
     osDelay(600);
   }
@@ -890,7 +865,7 @@ void StartCANWatchdog(void *argument)
   for(;;)
   {
 
-	  // Send CAN Heartbeat message
+	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
 	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
 	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
@@ -920,41 +895,41 @@ void StartCANWatchdog(void *argument)
 	 {
 		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET); // This turns the LED on
 		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+
+		 // Displays to the console any errors
+		 if(DISPLAY_CAN_ERRORS)
+		 {
+//			 if(heartBeatError)
+//			 {
+//				 printf("Heartbeat message not received within a second.\r\n");
+//				 fflush(stdout);
+//			 }
+			 if(temError)
+			 {
+				 printf("TEM message not received within a second.\r\n");
+				 fflush(stdout);
+			 }
+			 if(amsError)
+			 {
+				 printf("AMS message not received within a second.\r\n");
+				 fflush(stdout);
+			 }
+			 if(mcError)
+			 {
+				 printf("MC message not received within a second.\r\n");
+				 fflush(stdout);
+			 }
+			 if(chargerError)
+			 {
+				 printf("Charger message not received within a second.\r\n");
+				 fflush(stdout);
+		 	 }
+	 	 }
 	 }
 	 else
 	 {
 		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET); // This turns the LED off
 		 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
-
-		 // Displays to the console any errors
-//		 if(DISPLAY_CAN_ERRORS)
-//		 {
-////			 if(heartBeatError)
-////			 {
-////				 printf("Heartbeat message not received within a second.\r\n");
-////				 fflush(stdout);
-////			 }
-//			 if(temError)
-//			 {
-//				 printf("TEM message not received within a second.\r\n");
-//				 fflush(stdout);
-//			 }
-//			 if(amsError)
-//			 {
-//				 printf("AMS message not received within a second.\r\n");
-//				 fflush(stdout);
-//			 }
-//			 if(mcError)
-//			 {
-//				 printf("MC message not received within a second.\r\n");
-//				 fflush(stdout);
-//			 }
-//			 if(chargerError)
-//			 {
-//				 printf("Charger message not received within a second.\r\n");
-//				 fflush(stdout);
-//		 	 }
-//	 	 }
    	 }
 
     osDelay(700);
