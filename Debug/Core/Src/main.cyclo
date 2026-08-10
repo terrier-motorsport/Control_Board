@@ -1,0 +1,16 @@
+../Core/Src/main.c:185:5:main	2
+../Core/Src/main.c:316:6:SystemClock_Config	4
+../Core/Src/main.c:376:13:MX_ADC1_Init	4
+../Core/Src/main.c:445:13:MX_FDCAN1_Init	5
+../Core/Src/main.c:528:13:MX_USART2_UART_Init	5
+../Core/Src/main.c:576:13:MX_GPIO_Init	1
+../Core/Src/main.c:620:6:HAL_FDCAN_RxFifo0Callback	15
+../Core/Src/main.c:723:19:CAN_Send	1
+../Core/Src/main.c:751:9:lastMessageSent	2
+../Core/Src/main.c:760:5:_write	1
+../Core/Src/main.c:775:6:ControlPedal	7
+../Core/Src/main.c:867:6:StartCANWatchdog	7
+../Core/Src/main.c:952:6:StartAPPSCalibration	1
+../Core/Src/main.c:965:6:MPU_Config	1
+../Core/Src/main.c:1000:6:HAL_TIM_PeriodElapsedCallback	2
+../Core/Src/main.c:1018:6:Error_Handler	1
