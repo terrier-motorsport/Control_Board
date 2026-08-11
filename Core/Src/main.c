@@ -83,6 +83,13 @@ const osThreadAttr_t APPSCalibration_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for DataDisplay */
+osThreadId_t DataDisplayHandle;
+const osThreadAttr_t DataDisplay_attributes = {
+  .name = "DataDisplay",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 
 FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the transmitted frame
@@ -162,6 +169,7 @@ static void MX_USART2_UART_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
+void DisplayData(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -199,6 +207,11 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
+
+  BSP_LED_Init(LED_GREEN);
+  BSP_LED_Init(LED_YELLOW);
+  BSP_LED_Init(LED_RED);
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -215,24 +228,8 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  TxHeader.Identifier  = 0x123; // ID the STM is transmitting with
+  printf("System Check");
 
-  // Describes how CAN frame should be transmitted
-
-  TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
-  TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
-  TxHeader.DataLength  = FDCAN_DLC_BYTES_8; // Data Length Code (DLC) -- The number of bytes in the data frame
-//  TxHeader.TransmitGlobalTime = DISABLE; // Disables internal timestamp when sending data
-
-  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
-  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
-  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
-  TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
-
-
-  TxData[0] = 0;
-  TxData[7] = 0xFF;
 
   /* USER CODE END 2 */
 
@@ -265,6 +262,9 @@ int main(void)
   /* creation of APPSCalibration */
   APPSCalibrationHandle = osThreadNew(StartAPPSCalibration, NULL, &APPSCalibration_attributes);
 
+  /* creation of DataDisplay */
+  DataDisplayHandle = osThreadNew(DisplayData, NULL, &DataDisplay_attributes);
+
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
@@ -277,9 +277,6 @@ int main(void)
   BSP_LED_Init(LED_GREEN);
   BSP_LED_Init(LED_YELLOW);
   BSP_LED_Init(LED_RED);
-
-  /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
-  BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
   /* Initialize COM1 port (115200, 8 bits (7-bit data + 1 stop bit), no parity */
   BspCOMInit.BaudRate   = 115200;
@@ -457,13 +454,13 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
   hfdcan1.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 16;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 9;
-  hfdcan1.Init.NominalTimeSeg2 = 2;
+  hfdcan1.Init.NominalTimeSeg1 = 20;
+  hfdcan1.Init.NominalTimeSeg2 = 3;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
@@ -515,6 +512,25 @@ static void MX_FDCAN1_Init(void)
       {
     	  Error_Handler();
       }
+
+      TxHeader.Identifier  = 0x123; // ID the STM is transmitting with
+
+      // Describes how CAN frame should be transmitted
+
+      TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
+      TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
+      TxHeader.DataLength  = FDCAN_DLC_BYTES_8; // Data Length Code (DLC) -- The number of bytes in the data frame
+    //  TxHeader.TransmitGlobalTime = DISABLE; // Disables internal timestamp when sending data
+
+      TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
+      TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
+      TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+      TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
+      TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
+
+
+      TxData[0] = 0;
+      TxData[7] = 0xFF;
 
   /* USER CODE END FDCAN1_Init 2 */
 
@@ -778,6 +794,7 @@ void ControlPedal(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  BSP_LED_Toggle(LED_GREEN);    // Turns Green LED (PB0) ON
 	  //	UBaseType_t highWaterMark;
 
 	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
@@ -785,6 +802,7 @@ void ControlPedal(void *argument)
 	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  	  {
 	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
+	  		  BSP_LED_Toggle(LED_YELLOW);
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
@@ -800,7 +818,7 @@ void ControlPedal(void *argument)
 	  //	  sprintf(msg, "Voltage: %hu \r\n", inputPedalVoltage);
 	  //	  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
 
-	  //	inputPedalVoltage = 2.5;
+	  	inputPedalVoltage = 2.5;
 
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
 	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
@@ -818,6 +836,7 @@ void ControlPedal(void *argument)
 
 	  		TxData[0] = (CalculatedValue >> 8) & 0xFF;   // 0x00
 	  		TxData[1] = CalculatedValue & 0xFF;          // 0xc8
+
 
 	  	}
 	  	else if (inputPedalVoltage < CenterPedalVoltage[0] && inputPedalVoltage >= MinPedalVoltage[0]) // Checks if the car is braking and is not faulted
@@ -844,6 +863,7 @@ void ControlPedal(void *argument)
 	  	while (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK) // Wait till a Tx mailbox is free.
 	  	{
 
+//	  		BSP_LED_Toggle(LED_YELLOW);
 	  		osDelay(1); // Give back control to scheduler for 1ms
 
 	  	}
@@ -870,6 +890,7 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	 BSP_LED_Toggle(LED_RED);
 	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, FDCAN_DLC_BYTES_8); // TEM message
 	 CAN_Send(0x7E3, WatchDogTxData, FDCAN_DLC_BYTES_8); // AMS message
@@ -958,6 +979,64 @@ void StartAPPSCalibration(void *argument)
     osDelay(1);
   }
   /* USER CODE END StartAPPSCalibration */
+}
+
+/* USER CODE BEGIN Header_DisplayData */
+/**
+* @brief Function implementing the DataDisplay thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_DisplayData */
+void DisplayData(void *argument)
+{
+  /* USER CODE BEGIN DisplayData */
+  /* Infinite loop */
+  for(;;)
+  {
+
+	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
+	{
+		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+			{
+				Error_Handler();
+			}
+
+		uint16_t Rx_Id = RxHeader.Identifier; // Message ID of received data
+
+//		if (RxHeader.Identifier == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
+//			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
+//		} else {
+//			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
+//		}
+
+		uint8_t CANBufferLengthUsed = 0;
+
+		//snprintf returns the # of characters written
+//		printf("CAN Message: %08X	", Rx_Id);
+
+		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
+
+		for (int i = 0; i < 8; i++)
+		{
+			// Prints received CAN data as 2 digit hex on new lines
+			// Appends each new data on next empty CANBuffer spot
+			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
+		}
+		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
+
+//	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
+//	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
+
+
+		// Sends CANBuffer over UART
+		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
+
+	}
+
+    osDelay(600);
+  }
+  /* USER CODE END DisplayData */
 }
 
  /* MPU Configuration */
