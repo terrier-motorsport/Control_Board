@@ -60,8 +60,6 @@ ADC_HandleTypeDef hadc1;
 
 FDCAN_HandleTypeDef hfdcan1;
 
-UART_HandleTypeDef huart2;
-
 /* Definitions for PedalControl */
 osThreadId_t PedalControlHandle;
 const osThreadAttr_t PedalControl_attributes = {
@@ -91,6 +89,11 @@ const osThreadAttr_t DataDisplay_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+
+HAL_StatusTypeDef status;
+HAL_StatusTypeDef status2;
+uint32_t txFreeLevel; // Space in TX FIFO left
+uint32_t fdcanError;
 
 FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the transmitted frame
 FDCAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
@@ -135,6 +138,7 @@ char CANBuffer[100]; // Buffer used to display CAN messages on terminal
 uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
 
 
+
 ///////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////CAN Watchdog /////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
@@ -165,7 +169,6 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_FDCAN1_Init(void);
-static void MX_USART2_UART_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
@@ -225,7 +228,6 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   MX_FDCAN1_Init();
-  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   printf("System Check");
@@ -470,13 +472,13 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.RxFifo0ElmtsNbr = 0;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.RxFifo1ElmtsNbr = 0;
+  hfdcan1.Init.RxFifo1ElmtsNbr = 3;
   hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.RxBuffersNbr = 0;
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.TxEventsNbr = 0;
   hfdcan1.Init.TxBuffersNbr = 0;
-  hfdcan1.Init.TxFifoQueueElmtsNbr = 0;
+  hfdcan1.Init.TxFifoQueueElmtsNbr = 3;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -532,55 +534,8 @@ static void MX_FDCAN1_Init(void)
       TxData[0] = 0;
       TxData[7] = 0xFF;
 
+
   /* USER CODE END FDCAN1_Init 2 */
-
-}
-
-/**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 38400;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart2.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart2, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart2, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -598,8 +553,8 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -732,6 +687,11 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			break;
 
     }
+
+//    if (HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+//    {
+//    	Error_Handler();
+//    }
 }
 
 
@@ -773,11 +733,11 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 
 
 // Function to override print
-int _write(int file, char *ptr, int len)
-{
-    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-    return len;
-}
+//int _write(int file, char *ptr, int len)
+//{
+//    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+//    return len;
+//}
 
 /* USER CODE END 4 */
 
@@ -815,8 +775,9 @@ void ControlPedal(void *argument)
 	  //		  sprintf(msg, "ADC Timeout\r\n");
 	  //	  }
 	  	//inputPedalVoltage = HAL_ADC_GetValue(&hadc1); // Gets and stores ADC value from ADC1 into variable
-	  //	  sprintf(msg, "Voltage: %hu \r\n", inputPedalVoltage);
-	  //	  HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
+//	  	  snprintf(msg, sizeof(msg), "Voltage: \r\n");
+////	  	  snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id)
+//	  	  status2 = HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
 
 	  	inputPedalVoltage = 2.5;
 
@@ -860,11 +821,17 @@ void ControlPedal(void *argument)
 	  //	printf("CMD = 0x%X\r\n", CMD_SetRelativeCurrent);
 	  //	printf("StdId = 0x%X\r\n", TxHeader.StdId);
 
-	  	while (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK) // Wait till a Tx mailbox is free.
-	  	{
+  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 
+
+	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	{
+//	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+//	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 //	  		BSP_LED_Toggle(LED_YELLOW);
-	  		osDelay(1); // Give back control to scheduler for 1ms
+	  		osDelay(50); // Give back control to scheduler for 1ms
+//	  		Error_Handler();
 
 	  	}
 
@@ -995,44 +962,44 @@ void DisplayData(void *argument)
   for(;;)
   {
 
-	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
-	{
-		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-			{
-				Error_Handler();
-			}
-
-		uint16_t Rx_Id = RxHeader.Identifier; // Message ID of received data
-
-//		if (RxHeader.Identifier == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
-//			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
-//		} else {
-//			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
+//	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
+//	{
+//		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+//			{
+//				Error_Handler();
+//			}
+//
+//		uint16_t Rx_Id = RxHeader.Identifier; // Message ID of received data
+//
+////		if (RxHeader.Identifier == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
+////			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
+////		} else {
+////			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
+////		}
+//
+//		uint8_t CANBufferLengthUsed = 0;
+//
+//		//snprintf returns the # of characters written
+////		printf("CAN Message: %08X	", Rx_Id);
+//
+//		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
+//
+//		for (int i = 0; i < 8; i++)
+//		{
+//			// Prints received CAN data as 2 digit hex on new lines
+//			// Appends each new data on next empty CANBuffer spot
+//			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
 //		}
-
-		uint8_t CANBufferLengthUsed = 0;
-
-		//snprintf returns the # of characters written
-//		printf("CAN Message: %08X	", Rx_Id);
-
-		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
-
-		for (int i = 0; i < 8; i++)
-		{
-			// Prints received CAN data as 2 digit hex on new lines
-			// Appends each new data on next empty CANBuffer spot
-			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
-		}
-		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
-
-//	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
-//	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
-
-
-		// Sends CANBuffer over UART
-		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
-
-	}
+//		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
+//
+////	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
+////	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
+//
+//
+//		// Sends CANBuffer over UART
+//		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
+//
+//	}
 
     osDelay(600);
   }
