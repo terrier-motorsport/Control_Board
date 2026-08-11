@@ -210,11 +210,6 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
-
-  BSP_LED_Init(LED_GREEN);
-  BSP_LED_Init(LED_YELLOW);
-  BSP_LED_Init(LED_RED);
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -230,7 +225,6 @@ int main(void)
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
 
-  printf("System Check");
 
 
   /* USER CODE END 2 */
@@ -446,6 +440,9 @@ static void MX_FDCAN1_Init(void)
 
   /* USER CODE BEGIN FDCAN1_Init 0 */
 
+//	BSP_LED_On(LED_GREEN);    // Green LED indicates the CAN Bus is good
+//	BSP_LED_Off(LED_RED);    // Red LED indicates the CAN Bus is bad
+
 	FDCAN_FilterTypeDef filter; // Declares filter
 
   /* USER CODE END FDCAN1_Init 0 */
@@ -470,9 +467,9 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.MessageRAMOffset = 0;
   hfdcan1.Init.StdFiltersNbr = 0;
   hfdcan1.Init.ExtFiltersNbr = 0;
-  hfdcan1.Init.RxFifo0ElmtsNbr = 0;
+  hfdcan1.Init.RxFifo0ElmtsNbr = 3;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.RxFifo1ElmtsNbr = 3;
+  hfdcan1.Init.RxFifo1ElmtsNbr = 0;
   hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.RxBuffersNbr = 0;
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
@@ -591,6 +588,8 @@ static void MX_GPIO_Init(void)
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
 
+	printf("Message Received\r\n");
+
 	 if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
 	 {
 		 /* Retrieve Rx messages from RX FIFO0 */
@@ -696,14 +695,32 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
 
 // CAN Transmit Function
-HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t  length)
+HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 {
 //    CAN_TxHeaderTypeDef TxHeader;
 //    uint32_t TxMailbox;
 	  TxHeader.Identifier = id;
 	  TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
 	  TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
-	  TxHeader.DataLength  = length; // Data Length Code (DLC) -- The number of bytes in the data frame
+
+	  switch (length)
+	  {
+	      case 0: TxHeader.DataLength = FDCAN_DLC_BYTES_0; break; // Data Length Code (DLC) -- The number of bytes in the data frame
+	      case 1: TxHeader.DataLength = FDCAN_DLC_BYTES_1; break;
+	      case 2: TxHeader.DataLength = FDCAN_DLC_BYTES_2; break;
+	      case 3: TxHeader.DataLength = FDCAN_DLC_BYTES_3; break;
+	      case 4: TxHeader.DataLength = FDCAN_DLC_BYTES_4; break;
+	      case 5: TxHeader.DataLength = FDCAN_DLC_BYTES_5; break;
+	      case 6: TxHeader.DataLength = FDCAN_DLC_BYTES_6; break;
+	      case 7: TxHeader.DataLength = FDCAN_DLC_BYTES_7; break;
+	      case 8: TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
+
+	      default:
+	          // Invalid CAN payload length
+	          break;
+	  }
+
+//	  TxHeader.DataLength  = length; // Data Length Code (DLC) -- The number of bytes in the data frame
 	//  TxHeader.TransmitGlobalTime = DISABLE; // Disables internal timestamp when sending data
 
 	  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
@@ -719,8 +736,18 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t  length)
 //    TxHeader.RTR   = CAN_RTR_DATA;
 //    TxHeader.DLC   = length;
 //    TxHeader.TransmitGlobalTime = DISABLE;
+	  txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	{
+//	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+//	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
+//	  		BSP_LED_Toggle(LED_YELLOW);
+	  		osDelay(50); // Give back control to scheduler for 1ms
+//	  		Error_Handler();
 
-    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
+	  	}
+//    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
+	  	return 0;
 }
 
 // Function to check if a certain message was received over the last half second
@@ -754,7 +781,7 @@ void ControlPedal(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  BSP_LED_Toggle(LED_GREEN);    // Turns Green LED (PB0) ON
+//	  BSP_LED_Toggle(LED_GREEN);    // Turns Green LED (PB0) ON
 	  //	UBaseType_t highWaterMark;
 
 	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
@@ -762,7 +789,7 @@ void ControlPedal(void *argument)
 	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  	  {
 	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
-	  		  BSP_LED_Toggle(LED_YELLOW);
+//	  		  BSP_LED_Toggle(LED_YELLOW);
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
@@ -857,11 +884,10 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	 BSP_LED_Toggle(LED_RED);
 	  // Send placeholder CAN messages
-	 CAN_Send(0x080, WatchDogTxData, FDCAN_DLC_BYTES_8); // TEM message
-	 CAN_Send(0x7E3, WatchDogTxData, FDCAN_DLC_BYTES_8); // AMS message
-	 CAN_Send(0x41A, WatchDogTxData, FDCAN_DLC_BYTES_8); // MC message
+	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
 
 
 	 // Throw a lil delay to let the CAN message go thru
@@ -886,8 +912,10 @@ void StartCANWatchdog(void *argument)
 	 // If any of the error flags are high, Shut the relay down
 	 if(temError + amsError + mcError + chargerError)
 	 {
-		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED on
-		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+		 BSP_LED_On(LED_RED); // This turns the LED on
+		 BSP_LED_Off(LED_GREEN);
+//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED on
+//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
 
 		 // Displays to the console any errors
 		 if(DISPLAY_CAN_ERRORS)
@@ -921,8 +949,11 @@ void StartCANWatchdog(void *argument)
 	 }
 	 else
 	 {
-		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+
+		 BSP_LED_Off(LED_RED);
+		 BSP_LED_On(LED_GREEN);
    	 }
 
     osDelay(700);
@@ -943,7 +974,7 @@ void StartAPPSCalibration(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(1000);
   }
   /* USER CODE END StartAPPSCalibration */
 }
