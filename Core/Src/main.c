@@ -72,7 +72,7 @@ osThreadId_t CANWatchdogHandle;
 const osThreadAttr_t CANWatchdog_attributes = {
   .name = "CANWatchdog",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for APPSCalibration */
 osThreadId_t APPSCalibrationHandle;
@@ -81,10 +81,10 @@ const osThreadAttr_t APPSCalibration_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
-/* Definitions for DataDisplay */
-osThreadId_t DataDisplayHandle;
-const osThreadAttr_t DataDisplay_attributes = {
-  .name = "DataDisplay",
+/* Definitions for TestCANSend */
+osThreadId_t TestCANSendHandle;
+const osThreadAttr_t TestCANSend_attributes = {
+  .name = "TestCANSend",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -172,7 +172,7 @@ static void MX_FDCAN1_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
-void DisplayData(void *argument);
+void StartTestCANSend(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -258,8 +258,8 @@ int main(void)
   /* creation of APPSCalibration */
   APPSCalibrationHandle = osThreadNew(StartAPPSCalibration, NULL, &APPSCalibration_attributes);
 
-  /* creation of DataDisplay */
-  DataDisplayHandle = osThreadNew(DisplayData, NULL, &DataDisplay_attributes);
+  /* creation of TestCANSend */
+  TestCANSendHandle = osThreadNew(StartTestCANSend, NULL, &TestCANSend_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -440,9 +440,6 @@ static void MX_FDCAN1_Init(void)
 
   /* USER CODE BEGIN FDCAN1_Init 0 */
 
-//	BSP_LED_On(LED_GREEN);    // Green LED indicates the CAN Bus is good
-//	BSP_LED_Off(LED_RED);    // Red LED indicates the CAN Bus is bad
-
 	FDCAN_FilterTypeDef filter; // Declares filter
 
   /* USER CODE END FDCAN1_Init 0 */
@@ -519,7 +516,6 @@ static void MX_FDCAN1_Init(void)
       TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
       TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
       TxHeader.DataLength  = FDCAN_DLC_BYTES_8; // Data Length Code (DLC) -- The number of bytes in the data frame
-    //  TxHeader.TransmitGlobalTime = DISABLE; // Disables internal timestamp when sending data
 
       TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
       TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
@@ -587,8 +583,6 @@ static void MX_GPIO_Init(void)
 // Callback function for data received on FIFO0
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
-
-	printf("Message Received\r\n");
 
 	 if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
 	 {
@@ -686,11 +680,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			break;
 
     }
-
-//    if (HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
-//    {
-//    	Error_Handler();
-//    }
 }
 
 
@@ -720,9 +709,6 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 	          break;
 	  }
 
-//	  TxHeader.DataLength  = length; // Data Length Code (DLC) -- The number of bytes in the data frame
-	//  TxHeader.TransmitGlobalTime = DISABLE; // Disables internal timestamp when sending data
-
 	  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
 	  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
 	  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
@@ -730,12 +716,6 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 	  TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
 
 
-//    TxHeader.StdId = id;
-//    TxHeader.ExtId = 0;
-//    TxHeader.IDE   = CAN_ID_STD;
-//    TxHeader.RTR   = CAN_RTR_DATA;
-//    TxHeader.DLC   = length;
-//    TxHeader.TransmitGlobalTime = DISABLE;
 	  txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)) // Wait till a Tx mailbox is free.
 	  	{
@@ -743,7 +723,6 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 //	  		BSP_LED_Toggle(LED_YELLOW);
 	  		osDelay(50); // Give back control to scheduler for 1ms
-//	  		Error_Handler();
 
 	  	}
 //    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
@@ -856,7 +835,7 @@ void ControlPedal(void *argument)
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
-//	  		BSP_LED_Toggle(LED_YELLOW);
+	  		BSP_LED_Toggle(LED_YELLOW);
 	  		osDelay(50); // Give back control to scheduler for 1ms
 //	  		Error_Handler();
 
@@ -866,7 +845,7 @@ void ControlPedal(void *argument)
 	  //
 	  //	printf("Unused stack: %lu words\r\n", (uint32_t)highWaterMark); // Prints how much space a task is not using
 
-	    osDelay(500);
+	    osDelay(200);
   }
   /* USER CODE END 5 */
 }
@@ -884,14 +863,14 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  // Send placeholder CAN messages
-	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
+//	  // Send placeholder CAN messages
+//	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+//	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+//	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
 
 
 	 // Throw a lil delay to let the CAN message go thru
-	 osDelay(50);
+	 osDelay(100);
 
 	 // Check if each message has been received over the past half second
 //	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
@@ -956,7 +935,7 @@ void StartCANWatchdog(void *argument)
 		 BSP_LED_On(LED_GREEN);
    	 }
 
-    osDelay(700);
+    osDelay(300);
   }
   /* USER CODE END StartCANWatchdog */
 }
@@ -979,62 +958,27 @@ void StartAPPSCalibration(void *argument)
   /* USER CODE END StartAPPSCalibration */
 }
 
-/* USER CODE BEGIN Header_DisplayData */
+/* USER CODE BEGIN Header_StartTestCANSend */
 /**
-* @brief Function implementing the DataDisplay thread.
+* @brief Function implementing the TestCANSend thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_DisplayData */
-void DisplayData(void *argument)
+/* USER CODE END Header_StartTestCANSend */
+void StartTestCANSend(void *argument)
 {
-  /* USER CODE BEGIN DisplayData */
+  /* USER CODE BEGIN StartTestCANSend */
   /* Infinite loop */
   for(;;)
   {
+	  // Send placeholder CAN messages
+	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
 
-//	if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0) //  Checks if there are messages waiting in the receive FIFO
-//	{
-//		if (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
-//			{
-//				Error_Handler();
-//			}
-//
-//		uint16_t Rx_Id = RxHeader.Identifier; // Message ID of received data
-//
-////		if (RxHeader.Identifier == CAN_ID_STD) { // Checks if standard or extended CAN ID is being used
-////			Rx_Id = RxHeader.StdId; // Stores CAN ID of standard CAN message
-////		} else {
-////			Rx_Id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
-////		}
-//
-//		uint8_t CANBufferLengthUsed = 0;
-//
-//		//snprintf returns the # of characters written
-////		printf("CAN Message: %08X	", Rx_Id);
-//
-//		CANBufferLengthUsed += snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id); // Appends CAN ID to CANBuffer
-//
-//		for (int i = 0; i < 8; i++)
-//		{
-//			// Prints received CAN data as 2 digit hex on new lines
-//			// Appends each new data on next empty CANBuffer spot
-//			CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), " %02X", RxData[i]);
-//		}
-//		CANBufferLengthUsed += snprintf(&CANBuffer[CANBufferLengthUsed], sizeof((CANBuffer) - CANBufferLengthUsed), "\r\n");
-//
-////	    sprintf(msg, "Voltage: %.3f V\r\n", inputPedalVoltage);
-////	    HAL_UART_Transmit(&huart2, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
-//
-//
-//		// Sends CANBuffer over UART
-//		HAL_UART_Transmit(&huart2, (uint8_t *)CANBuffer, CANBufferLengthUsed, HAL_MAX_DELAY); // CANBufferLengthUsed used instead of sizeof(CANBuffer) bc length of the CANBuffer is already known
-//
-//	}
-
-    osDelay(600);
+	 osDelay(50);
   }
-  /* USER CODE END DisplayData */
+  /* USER CODE END StartTestCANSend */
 }
 
  /* MPU Configuration */
