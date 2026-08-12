@@ -88,6 +88,13 @@ const osThreadAttr_t TestCANSend_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for DataDisplay */
+osThreadId_t DataDisplayHandle;
+const osThreadAttr_t DataDisplay_attributes = {
+  .name = "DataDisplay",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
 /* USER CODE BEGIN PV */
 
 HAL_StatusTypeDef status;
@@ -173,6 +180,7 @@ void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
 void StartTestCANSend(void *argument);
+void StartDataDisplay(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -260,6 +268,9 @@ int main(void)
 
   /* creation of TestCANSend */
   TestCANSendHandle = osThreadNew(StartTestCANSend, NULL, &TestCANSend_attributes);
+
+  /* creation of DataDisplay */
+  DataDisplayHandle = osThreadNew(StartDataDisplay, NULL, &DataDisplay_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -607,23 +618,23 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 //		rx_id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
 //	}
 
-
     // Display the CAN message to the serial monitor
-    if(DISPLAY_CAN_MESSAGE){
+//    if(DISPLAY_CAN_MESSAGE){
+//
+//    	// Change Print syntax based on standard vs. extended
+//    	if (RxHeader.IdType == FDCAN_STANDARD_ID){
+//    		printf("RX STD ID: 0x%03lX | Data:", rx_id);
+//    	}
+//		else{
+//			printf("RX EXT ID: 0x%08lX | Data:", rx_id);
+//		}
+//
+//		for (int i = 0; i < RxHeader.DataLength; i++)
+//			printf(" %02X", RxData[i]);
+//
+//		printf("\r\n");
+//    }
 
-    	// Change Print syntax based on standard vs. extended
-    	if (RxHeader.IdType == FDCAN_STANDARD_ID){
-    		printf("RX STD ID: 0x%03lX | Data:", rx_id);
-    	}
-		else{
-			printf("RX EXT ID: 0x%08lX | Data:", rx_id);
-		}
-
-		for (int i = 0; i < RxHeader.DataLength; i++)
-			printf(" %02X", RxData[i]);
-
-		printf("\r\n");
-    }
 
     // Based on the CAN ID, determines what ECU sent the message, and update the time that
     // the ECU sent it's message, as well as resetting any error
@@ -973,14 +984,56 @@ void StartTestCANSend(void *argument)
   {
 	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-	 osDelay(50);
+//	 osDelay(50);
 	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-	 osDelay(50);
+//	 osDelay(50);
 	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
 
 	 osDelay(50);
   }
   /* USER CODE END StartTestCANSend */
+}
+
+/* USER CODE BEGIN Header_StartDataDisplay */
+/**
+* @brief Function implementing the DataDisplay thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartDataDisplay */
+void StartDataDisplay(void *argument)
+{
+  /* USER CODE BEGIN StartDataDisplay */
+  /* Infinite loop */
+  for(;;)
+  {
+
+	uint32_t rx_id_data_display = RxHeader.Identifier; // Message ID of received data
+
+	// Display the CAN message to the serial monitor
+	if(DISPLAY_CAN_MESSAGE){
+
+		// Change Print syntax based on standard vs. extended
+		if (RxHeader.IdType == FDCAN_STANDARD_ID){
+			printf("RX STD ID: 0x%03lX | Data:", rx_id_data_display);
+		}
+		else{
+			printf("RX EXT ID: 0x%08lX | Data:", rx_id_data_display);
+		}
+
+		for (int i = 0; i < RxHeader.DataLength; i++)
+			printf(" %02X", RxData[i]);
+
+		printf("\r\n");
+
+		osDelay(400);
+	}
+	else
+	{
+		osDelay(1);
+	}
+  }
+  /* USER CODE END StartDataDisplay */
 }
 
  /* MPU Configuration */
