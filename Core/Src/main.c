@@ -110,6 +110,8 @@ uint8_t WatchDogTxData[8] = {1}; // Random Buffer data to simulate messages for 
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
+uint8_t rxByte;
+
 const uint8_t MC_NodeId = 0x04; // Node ID of the MC
 
 // MC commands
@@ -233,6 +235,8 @@ int main(void)
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
 
+	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
+	HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
 
 
   /* USER CODE END 2 */
@@ -590,6 +594,17 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+// Callback function for data received on UART3/terminal
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == &hcom_uart[COM1]) // Checks which COM/UART triggered the callback function. In this case, COM1/UART3
+    {
+        printf("Received: %c\r\n", rxByte); // Echoes back what was inputed into the terminal
+
+        HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
+    }
+}
 
 // Callback function for data received on FIFO0
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
@@ -982,6 +997,11 @@ void StartTestCANSend(void *argument)
   /* Infinite loop */
   for(;;)
   {
+
+	 // Tells HAL to enable reception via interrupt
+	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);  // Receives 1 byte of data and triggers interrupt
+
+
 	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
 //	 osDelay(50);
@@ -1030,7 +1050,7 @@ void StartDataDisplay(void *argument)
 	}
 	else
 	{
-		osDelay(1);
+		osThreadSuspend(DataDisplayHandle);
 	}
   }
   /* USER CODE END StartDataDisplay */

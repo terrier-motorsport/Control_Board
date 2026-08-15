@@ -190,4 +190,11 @@ void TIM6_DAC_IRQHandler(void)
 
 /* USER CODE BEGIN 1 */
 
+// IRQ handler for USART3; when USART3 generates an interrupt, it gives it over to HAL
+
+void USART3_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&hcom_uart[COM1]);
+}
+
 /* USER CODE END 1 */
