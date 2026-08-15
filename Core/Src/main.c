@@ -95,6 +95,13 @@ const osThreadAttr_t DataDisplay_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for Commands */
+osThreadId_t CommandsHandle;
+const osThreadAttr_t Commands_attributes = {
+  .name = "Commands",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
 /* USER CODE BEGIN PV */
 
 HAL_StatusTypeDef status;
@@ -110,7 +117,7 @@ uint8_t WatchDogTxData[8] = {1}; // Random Buffer data to simulate messages for 
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
-uint8_t rxByte; // Rx buffer for data received via USART3/terminal
+uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 
 const uint8_t MC_NodeId = 0x04; // Node ID of the MC
 
@@ -183,6 +190,7 @@ void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
 void StartTestCANSend(void *argument);
 void StartDataDisplay(void *argument);
+void StartCommands(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -275,6 +283,9 @@ int main(void)
 
   /* creation of DataDisplay */
   DataDisplayHandle = osThreadNew(StartDataDisplay, NULL, &DataDisplay_attributes);
+
+  /* creation of Commands */
+  CommandsHandle = osThreadNew(StartCommands, NULL, &Commands_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -600,9 +611,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart == &hcom_uart[COM1]) // Checks which COM/UART triggered the callback function. In this case, COM1/UART3
     {
-        printf("Received: %c\r\n", rxByte); // Echoes back what was inputed into the terminal
+        printf("Received: %c\r\n", serialByte); // Echoes back what was inputed into the terminal
 
-        HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
+        HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
     }
 }
 
@@ -715,6 +726,7 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 
 	      default:
 	          // Invalid CAN payload length
+	    	  TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
 	          break;
 	  }
 
@@ -969,7 +981,7 @@ void StartTestCANSend(void *argument)
   {
 
 	 // Tells HAL to enable reception via interrupt
-	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);  // Receives 1 byte of data and triggers interrupt
+	 HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt
 
 
 	  // Send placeholder CAN messages
@@ -1024,6 +1036,43 @@ void StartDataDisplay(void *argument)
 	}
   }
   /* USER CODE END StartDataDisplay */
+}
+
+/* USER CODE BEGIN Header_StartCommands */
+/**
+* @brief Function implementing the Commands thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartCommands */
+void StartCommands(void *argument)
+{
+  /* USER CODE BEGIN StartCommands */
+  /* Infinite loop */
+  for(;;)
+  {
+
+
+	switch(serialByte) // Reads values as ascii characters; numbers need to be converted to char type before checking
+	{
+		case 'a':
+			{
+				osThreadSuspend(DataDisplayHandle);
+				break;
+			}
+		case 'd':
+			{
+				osThreadResume(DataDisplayHandle);
+				break;
+			}
+
+		default: break;
+	}
+	serialByte = 0;
+
+    osDelay(800);
+  }
+  /* USER CODE END StartCommands */
 }
 
  /* MPU Configuration */
