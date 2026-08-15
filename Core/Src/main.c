@@ -110,7 +110,7 @@ uint8_t WatchDogTxData[8] = {1}; // Random Buffer data to simulate messages for 
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
-uint8_t rxByte;
+uint8_t rxByte; // Rx buffer for data received via USART3/terminal
 
 const uint8_t MC_NodeId = 0x04; // Node ID of the MC
 
@@ -633,23 +633,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 //		rx_id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
 //	}
 
-    // Display the CAN message to the serial monitor
-//    if(DISPLAY_CAN_MESSAGE){
-//
-//    	// Change Print syntax based on standard vs. extended
-//    	if (RxHeader.IdType == FDCAN_STANDARD_ID){
-//    		printf("RX STD ID: 0x%03lX | Data:", rx_id);
-//    	}
-//		else{
-//			printf("RX EXT ID: 0x%08lX | Data:", rx_id);
-//		}
-//
-//		for (int i = 0; i < RxHeader.DataLength; i++)
-//			printf(" %02X", RxData[i]);
-//
-//		printf("\r\n");
-//    }
-
 
     // Based on the CAN ID, determines what ECU sent the message, and update the time that
     // the ECU sent it's message, as well as resetting any error
@@ -762,14 +745,6 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 	}
 	return 0;
 }
-
-
-// Function to override print
-//int _write(int file, char *ptr, int len)
-//{
-//    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-//    return len;
-//}
 
 /* USER CODE END 4 */
 
@@ -889,11 +864,6 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
-//	  // Send placeholder CAN messages
-//	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-//	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-//	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
-
 
 	 // Throw a lil delay to let the CAN message go thru
 	 osDelay(100);

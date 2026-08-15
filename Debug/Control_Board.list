@@ -476,12 +476,12 @@ int main(void)
  8000704:	f000 f960 	bl	80009c8 <MX_FDCAN1_Init>
   /* USER CODE BEGIN 2 */
 
-	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0);
+	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
  8000708:	2200      	movs	r2, #0
  800070a:	2105      	movs	r1, #5
  800070c:	2027      	movs	r0, #39	@ 0x27
  800070e:	f003 fa81 	bl	8003c14 <HAL_NVIC_SetPriority>
-	HAL_NVIC_EnableIRQ(USART3_IRQn);
+	HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
  8000712:	2027      	movs	r0, #39	@ 0x27
  8000714:	f003 fa98 	bl	8003c48 <HAL_NVIC_EnableIRQ>
 
@@ -1356,26 +1356,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// Callback function for data received on UART3/terminal
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
  8000c2c:	b580      	push	{r7, lr}
  8000c2e:	b082      	sub	sp, #8
  8000c30:	af00      	add	r7, sp, #0
  8000c32:	6078      	str	r0, [r7, #4]
-    if (huart == &hcom_uart[COM1])
+    if (huart == &hcom_uart[COM1]) // Checks which COM/UART triggered the callback function. In this case, COM1/UART3
  8000c34:	687b      	ldr	r3, [r7, #4]
  8000c36:	4a09      	ldr	r2, [pc, #36]	@ (8000c5c <HAL_UART_RxCpltCallback+0x30>)
  8000c38:	4293      	cmp	r3, r2
  8000c3a:	d10a      	bne.n	8000c52 <HAL_UART_RxCpltCallback+0x26>
     {
-        printf("Received: %c\r\n", rxByte);
+        printf("Received: %c\r\n", rxByte); // Echoes back what was inputed into the terminal
  8000c3c:	4b08      	ldr	r3, [pc, #32]	@ (8000c60 <HAL_UART_RxCpltCallback+0x34>)
  8000c3e:	781b      	ldrb	r3, [r3, #0]
  8000c40:	4619      	mov	r1, r3
  8000c42:	4808      	ldr	r0, [pc, #32]	@ (8000c64 <HAL_UART_RxCpltCallback+0x38>)
  8000c44:	f00e fef4 	bl	800fa30 <iprintf>
 
-        HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);
+        HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
  8000c48:	2201      	movs	r2, #1
  8000c4a:	4905      	ldr	r1, [pc, #20]	@ (8000c60 <HAL_UART_RxCpltCallback+0x34>)
  8000c4c:	4803      	ldr	r0, [pc, #12]	@ (8000c5c <HAL_UART_RxCpltCallback+0x30>)
@@ -2275,16 +2276,18 @@ void StartTestCANSend(void *argument)
  800123e:	b082      	sub	sp, #8
  8001240:	af00      	add	r7, sp, #0
  8001242:	6078      	str	r0, [r7, #4]
-  /* USER CODE BEGIN StartTestCANSend */
   /* Infinite loop */
   for(;;)
   {
 
-	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);
+	 // Tells HAL to enable reception via interrupt
+	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);  // Receives 1 byte of data and triggers interrupt
  8001244:	2201      	movs	r2, #1
  8001246:	490d      	ldr	r1, [pc, #52]	@ (800127c <StartTestCANSend+0x40>)
  8001248:	480d      	ldr	r0, [pc, #52]	@ (8001280 <StartTestCANSend+0x44>)
  800124a:	f008 fe59 	bl	8009f00 <HAL_UART_Receive_IT>
+
+
 	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
  800124e:	2208      	movs	r2, #8
@@ -2307,7 +2310,7 @@ void StartTestCANSend(void *argument)
 	 osDelay(50);
  8001270:	2032      	movs	r0, #50	@ 0x32
  8001272:	f00b faf8 	bl	800c866 <osDelay>
-	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);
+	 HAL_UART_Receive_IT(&hcom_uart[COM1], &rxByte, 1);  // Receives 1 byte of data and triggers interrupt
  8001276:	bf00      	nop
  8001278:	e7e4      	b.n	8001244 <StartTestCANSend+0x8>
  800127a:	bf00      	nop
@@ -3165,8 +3168,9 @@ void TIM6_DAC_IRQHandler(void)
  80016f0:	240003e8 	.word	0x240003e8
 
 080016f4 <USART3_IRQHandler>:
-
 /* USER CODE BEGIN 1 */
+
+// IRQ handler for USART3; when USART3 generates an interrupt, it gives it over to HAL
 
 void USART3_IRQHandler(void)
 {
