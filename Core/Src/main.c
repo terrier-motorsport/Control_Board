@@ -102,6 +102,11 @@ const osThreadAttr_t Commands_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for CANRxQueue */
+osMessageQueueId_t CANRxQueueHandle;
+const osMessageQueueAttr_t CANRxQueue_attributes = {
+  .name = "CANRxQueue"
+};
 /* USER CODE BEGIN PV */
 
 HAL_StatusTypeDef status;
@@ -166,6 +171,8 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
  uint32_t lastMcMessage = 0;
  uint32_t lastChargerMessage = 0;
 
+ uint32_t lastMessage = 0;
+
  // Initializes flags to indicate when a certain ECU hasn't sent a message in a second, timing out
 // uint8_t heartBeatError = 0;
  uint8_t temError = 0;
@@ -175,6 +182,12 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
 
  // Creates int to determine if we are charging or not
  uint8_t isCharging = 0;
+
+
+
+ uint32_t queueCount;
+ uint32_t queueSpace;
+ osStatus_t queueStatus;
 
 
 /* USER CODE END PV */
@@ -195,7 +208,7 @@ void StartCommands(void *argument);
 /* USER CODE BEGIN PFP */
 
 // Prototype for CAN Transmission
-//HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint8_t length);
+HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length);
 
 // Prototype to see if a certain message hasn't been seen in over a second
 uint8_t lastMessageSent(uint32_t lastMessage);
@@ -204,6 +217,16 @@ uint8_t lastMessageSent(uint32_t lastMessage);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+typedef struct
+{
+	uint32_t id;
+
+} CANRxMessage;
+
+//CANRxMessage CANmsg;
+CANRxMessage queueBufferMessage;
+CANRxMessage queueBufferRecieved;
 
 /* USER CODE END 0 */
 
@@ -263,6 +286,10 @@ int main(void)
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* creation of CANRxQueue */
+  CANRxQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &CANRxQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -631,13 +658,18 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 		 }
 	 }
 
+	 lastMessage = HAL_GetTick();
+	 CANRxMessage CANmsg;
+	 CANmsg.id = RxHeader.Identifier;
+	 queueBufferMessage = CANmsg;
+	 queueStatus = osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 
-//    CAN_RxHeaderTypeDef RxHeader;
-//    uint8_t RxData[8];
+//	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
+//	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
 
     // Determine standard vs extended CAN ID - NEW
-	uint32_t rx_id = RxHeader.Identifier; // Message ID of received data
+//	uint32_t rx_id = RxHeader.Identifier; // Message ID of received data
 //	if (RxHeader.IdType  == FDCAN_STANDARD_ID) {
 //		rx_id = RxHeader.StdId; // Stores CAN ID of standard CAN message
 //	} else {
@@ -647,59 +679,59 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     // Based on the CAN ID, determines what ECU sent the message, and update the time that
     // the ECU sent it's message, as well as resetting any error
-    switch(rx_id)
-    {
-    	// CAN Heartbeat message
-//        case 0x023:
-//            lastHeartBeatMessage = HAL_GetTick();
-//            heartBeatError = 0;
-//            break;
-
-        // TEM Message
-        case 0x080:
-        	lastTemMessage = HAL_GetTick();
-			temError = 0;
-			break;
-
-		// AMS Message
-        case 0x7E3:
-        	lastAmsMessage = HAL_GetTick();
-			amsError = 0;
-
-			// Check to see if charging
-			if(RxData[0] == 0xFF){
-				isCharging = 1;
-				if(DISPLAY_CAN_ERRORS){
-					if(RxData[1] != 0x00){
-						printf("AMS CAN Charging Message is Corrupt.\r\n");
-						fflush(stdout);
-					}
-				}
-			}
-			else if(RxData[0] == 0x00){
-				isCharging = 0;
-				if(DISPLAY_CAN_ERRORS){
-					if(RxData[1] != 0xFF){
-						printf("AMS CAN Charging Message is Corrupt.\r\n");
-						fflush(stdout);
-					}
-				}
-			}
-			break;
-
-		// MC Message
-        case 0x41A:
-        	lastMcMessage = HAL_GetTick();
-			mcError = 0;
-			break;
-
-		// Charger Message - UPDATE
-		case 0x18FF50E5:
-			lastChargerMessage = HAL_GetTick();
-			chargerError = 0;
-			break;
-
-    }
+//    switch(rx_id)
+//    {
+//    	// CAN Heartbeat message
+////        case 0x023:
+////            lastHeartBeatMessage = HAL_GetTick();
+////            heartBeatError = 0;
+////            break;
+//
+//        // TEM Message
+//        case 0x080:
+//        	lastTemMessage = HAL_GetTick();
+//			temError = 0;
+//			break;
+//
+//		// AMS Message
+//        case 0x7E3:
+//        	lastAmsMessage = HAL_GetTick();
+//			amsError = 0;
+//
+//			// Check to see if charging
+//			if(RxData[0] == 0xFF){
+//				isCharging = 1;
+//				if(DISPLAY_CAN_ERRORS){
+//					if(RxData[1] != 0x00){
+//						printf("AMS CAN Charging Message is Corrupt.\r\n");
+//						fflush(stdout);
+//					}
+//				}
+//			}
+//			else if(RxData[0] == 0x00){
+//				isCharging = 0;
+//				if(DISPLAY_CAN_ERRORS){
+//					if(RxData[1] != 0xFF){
+//						printf("AMS CAN Charging Message is Corrupt.\r\n");
+//						fflush(stdout);
+//					}
+//				}
+//			}
+//			break;
+//
+//		// MC Message
+//        case 0x41A:
+//        	lastMcMessage = HAL_GetTick();
+//			mcError = 0;
+//			break;
+//
+//		// Charger Message - UPDATE
+//		case 0x18FF50E5:
+//			lastChargerMessage = HAL_GetTick();
+//			chargerError = 0;
+//			break;
+//
+//    }
 }
 
 
@@ -858,7 +890,7 @@ void ControlPedal(void *argument)
 	  //
 	  //	printf("Unused stack: %lu words\r\n", (uint32_t)highWaterMark); // Prints how much space a task is not using
 
-	    osDelay(200);
+	    osDelay(20);
   }
   /* USER CODE END 5 */
 }
@@ -876,9 +908,71 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
+	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
+	 CANRxMessage CANmsg;
+	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; blocks task if queue is full
+
+	 queueBufferRecieved = CANmsg;
 	 // Throw a lil delay to let the CAN message go thru
-	 osDelay(100);
+//	 osDelay(50);
+
+	     switch(CANmsg.id)
+	     {
+	     	// CAN Heartbeat message
+	 //        case 0x023:
+	 //            lastHeartBeatMessage = HAL_GetTick();
+	 //            heartBeatError = 0;
+	 //            break;
+
+	         // TEM Message
+	         case 0x080:
+	         	lastTemMessage = lastMessage;
+	 			temError = 0;
+	 			break;
+
+	 		// AMS Message
+	         case 0x7E3:
+	         	lastAmsMessage = lastMessage;
+	 			amsError = 0;
+
+	 			// Check to see if charging
+	 			if(RxData[0] == 0xFF){
+	 				isCharging = 1;
+	 				if(DISPLAY_CAN_ERRORS){
+	 					if(RxData[1] != 0x00){
+	 						printf("AMS CAN Charging Message is Corrupt.\r\n");
+	 						fflush(stdout);
+	 					}
+	 				}
+	 			}
+	 			else if(RxData[0] == 0x00){
+	 				isCharging = 0;
+	 				if(DISPLAY_CAN_ERRORS){
+	 					if(RxData[1] != 0xFF){
+	 						printf("AMS CAN Charging Message is Corrupt.\r\n");
+	 						fflush(stdout);
+	 					}
+	 				}
+	 			}
+	 			break;
+
+	 		// MC Message
+	         case 0x41A:
+	         	lastMcMessage = lastMessage;
+	 			mcError = 0;
+	 			break;
+
+	 		// Charger Message - UPDATE
+	 		case 0x18FF50E5:
+	 			lastChargerMessage = lastMessage;
+	 			chargerError = 0;
+	 			break;
+
+	     }
+
+//	 printf("RX STD ID: 0x%03lX | Data:", RxHeader.Identifier);
 
 	 // Check if each message has been received over the past half second
 //	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
@@ -943,7 +1037,7 @@ void StartCANWatchdog(void *argument)
 		 BSP_LED_On(LED_GREEN);
    	 }
 
-    osDelay(300);
+//    osDelay(20);
   }
   /* USER CODE END StartCANWatchdog */
 }
@@ -1028,7 +1122,7 @@ void StartDataDisplay(void *argument)
 
 		printf("\r\n");
 
-		osDelay(400);
+		osDelay(100);
 	}
 	else
 	{
