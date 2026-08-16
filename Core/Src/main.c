@@ -107,6 +107,11 @@ osMessageQueueId_t CANRxQueueHandle;
 const osMessageQueueAttr_t CANRxQueue_attributes = {
   .name = "CANRxQueue"
 };
+/* Definitions for DisplayDataQueue */
+osMessageQueueId_t DisplayDataQueueHandle;
+const osMessageQueueAttr_t DisplayDataQueue_attributes = {
+  .name = "DisplayDataQueue"
+};
 /* USER CODE BEGIN PV */
 
 HAL_StatusTypeDef status;
@@ -185,9 +190,9 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
 
 
 
- uint32_t queueCount;
- uint32_t queueSpace;
- osStatus_t queueStatus;
+ uint32_t queueCount; // Amount of items in queue
+ uint32_t queueSpace; // Amount of available space left in queue
+ osStatus_t queueStatus; // Execution status of the queue
 
 
 /* USER CODE END PV */
@@ -221,12 +226,14 @@ uint8_t lastMessageSent(uint32_t lastMessage);
 typedef struct
 {
 	uint32_t id;
+	uint32_t idType;
+	uint32_t dataLength;
 
 } CANRxMessage;
 
-//CANRxMessage CANmsg;
-CANRxMessage queueBufferMessage;
-CANRxMessage queueBufferRecieved;
+CANRxMessage queueBufferMessage; // Data being stored in the queue
+CANRxMessage queueBufferRecieved; // Data being read from the queue
+
 
 /* USER CODE END 0 */
 
@@ -290,6 +297,9 @@ int main(void)
   /* Create the queue(s) */
   /* creation of CANRxQueue */
   CANRxQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &CANRxQueue_attributes);
+
+  /* creation of DisplayDataQueue */
+  DisplayDataQueueHandle = osMessageQueueNew (16, sizeof(uint32_t), &DisplayDataQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -676,62 +686,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 //		rx_id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
 //	}
 
-
-    // Based on the CAN ID, determines what ECU sent the message, and update the time that
-    // the ECU sent it's message, as well as resetting any error
-//    switch(rx_id)
-//    {
-//    	// CAN Heartbeat message
-////        case 0x023:
-////            lastHeartBeatMessage = HAL_GetTick();
-////            heartBeatError = 0;
-////            break;
-//
-//        // TEM Message
-//        case 0x080:
-//        	lastTemMessage = HAL_GetTick();
-//			temError = 0;
-//			break;
-//
-//		// AMS Message
-//        case 0x7E3:
-//        	lastAmsMessage = HAL_GetTick();
-//			amsError = 0;
-//
-//			// Check to see if charging
-//			if(RxData[0] == 0xFF){
-//				isCharging = 1;
-//				if(DISPLAY_CAN_ERRORS){
-//					if(RxData[1] != 0x00){
-//						printf("AMS CAN Charging Message is Corrupt.\r\n");
-//						fflush(stdout);
-//					}
-//				}
-//			}
-//			else if(RxData[0] == 0x00){
-//				isCharging = 0;
-//				if(DISPLAY_CAN_ERRORS){
-//					if(RxData[1] != 0xFF){
-//						printf("AMS CAN Charging Message is Corrupt.\r\n");
-//						fflush(stdout);
-//					}
-//				}
-//			}
-//			break;
-//
-//		// MC Message
-//        case 0x41A:
-//        	lastMcMessage = HAL_GetTick();
-//			mcError = 0;
-//			break;
-//
-//		// Charger Message - UPDATE
-//		case 0x18FF50E5:
-//			lastChargerMessage = HAL_GetTick();
-//			chargerError = 0;
-//			break;
-//
-//    }
 }
 
 
@@ -774,7 +728,6 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
-//	  		BSP_LED_Toggle(LED_YELLOW);
 	  		osDelay(50); // Give back control to scheduler for 1ms
 
 	  	}
@@ -805,7 +758,6 @@ void ControlPedal(void *argument)
   /* Infinite loop */
   for(;;)
   {
-//	  BSP_LED_Toggle(LED_GREEN);    // Turns Green LED (PB0) ON
 	  //	UBaseType_t highWaterMark;
 
 	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
@@ -813,7 +765,6 @@ void ControlPedal(void *argument)
 	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  	  {
 	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
-//	  		  BSP_LED_Toggle(LED_YELLOW);
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
@@ -868,10 +819,6 @@ void ControlPedal(void *argument)
 	  		TxData[1] = 0xFF;
 	  	}
 
-
-	  //	printf("CMD = 0x%X\r\n", CMD_SetRelativeCurrent);
-	  //	printf("StdId = 0x%X\r\n", TxHeader.StdId);
-
   		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
   		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 
@@ -918,6 +865,8 @@ void StartCANWatchdog(void *argument)
 	 // Throw a lil delay to let the CAN message go thru
 //	 osDelay(50);
 
+	    // Based on the CAN ID, determines what ECU sent the message, and update the time that
+	    // the ECU sent it's message, as well as resetting any error
 	     switch(CANmsg.id)
 	     {
 	     	// CAN Heartbeat message
@@ -972,7 +921,6 @@ void StartCANWatchdog(void *argument)
 
 	     }
 
-//	 printf("RX STD ID: 0x%03lX | Data:", RxHeader.Identifier);
 
 	 // Check if each message has been received over the past half second
 //	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
