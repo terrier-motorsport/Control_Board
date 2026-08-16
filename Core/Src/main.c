@@ -114,6 +114,9 @@ const osMessageQueueAttr_t DisplayDataQueue_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+//uint8_t DISPLAY_CAN_MESSAGE = 1;			// Turn this on/off if you want to print/ignore raw CAN Messages
+//uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignore CAN Errors
+
 HAL_StatusTypeDef status;
 HAL_StatusTypeDef status2;
 uint32_t txFreeLevel; // Space in TX FIFO left
@@ -123,11 +126,16 @@ FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the tran
 FDCAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
 
 uint8_t TxData[8] = {0}; // Buffer of the data to send (8 bytes data)
-uint8_t WatchDogTxData[8] = {1}; // Random Buffer data to simulate messages for Watchdog
+uint8_t WatchDogTxData[8] = {9}; // Random Buffer data to simulate messages for Watchdog
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
 uint8_t serialByte; // Rx buffer for data received via USART3/terminal
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// Motor Controller ////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
 
 const uint8_t MC_NodeId = 0x04; // Node ID of the MC
 
@@ -190,6 +198,11 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
 
 
 
+ ///////////////////////////////////////////////////////////////////////////////////////////////
+ /////////////////////////////////// Queue Debugging //////////////////////////////////////////
+ /////////////////////////////////////////////////////////////////////////////////////////////
+
+
  uint32_t queueCount; // Amount of items in queue
  uint32_t queueSpace; // Amount of available space left in queue
  osStatus_t queueStatus; // Execution status of the queue
@@ -228,6 +241,7 @@ typedef struct
 	uint32_t id;
 	uint32_t idType;
 	uint32_t dataLength;
+	uint8_t data[8];
 
 } CANRxMessage;
 
@@ -245,6 +259,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
+//	HAL_Delay(30000); // Delay for when the car starts up
 
   /* USER CODE END 1 */
 
@@ -299,7 +315,7 @@ int main(void)
   CANRxQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &CANRxQueue_attributes);
 
   /* creation of DisplayDataQueue */
-  DisplayDataQueueHandle = osMessageQueueNew (16, sizeof(uint32_t), &DisplayDataQueue_attributes);
+  DisplayDataQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &DisplayDataQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -671,20 +687,12 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 	 lastMessage = HAL_GetTick();
 	 CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
+	 CANmsg.idType = RxHeader.IdType;
+	 CANmsg.dataLength = RxHeader.DataLength;
+	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here sine array assignment can't be done, plus it would become a pointer
 	 queueBufferMessage = CANmsg;
 	 queueStatus = osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
-
-//	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
-//	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
-
-
-    // Determine standard vs extended CAN ID - NEW
-//	uint32_t rx_id = RxHeader.Identifier; // Message ID of received data
-//	if (RxHeader.IdType  == FDCAN_STANDARD_ID) {
-//		rx_id = RxHeader.StdId; // Stores CAN ID of standard CAN message
-//	} else {
-//		rx_id = RxHeader.ExtId; // Stores CAN ID of extended CAN message
-//	}
+	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
 
 }
 
@@ -859,7 +867,7 @@ void StartCANWatchdog(void *argument)
 	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
 	 CANRxMessage CANmsg;
-	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; blocks task if queue is full
+	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
 
 	 queueBufferRecieved = CANmsg;
 	 // Throw a lil delay to let the CAN message go thru
@@ -1052,29 +1060,29 @@ void StartDataDisplay(void *argument)
   for(;;)
   {
 
-	uint32_t rx_id_data_display = RxHeader.Identifier; // Message ID of received data
+    CANRxMessage CANPrintmsg;
+    osMessageQueueGet(DisplayDataQueueHandle, &CANPrintmsg, NULL, osWaitForever); // Pull data from DisplayData queue
 
 	// Display the CAN message to the serial monitor
 	if(DISPLAY_CAN_MESSAGE){
 
 		// Change Print syntax based on standard vs. extended
-		if (RxHeader.IdType == FDCAN_STANDARD_ID){
-			printf("RX STD ID: 0x%03lX | Data:", rx_id_data_display);
+		if (CANPrintmsg.idType == FDCAN_STANDARD_ID){
+			printf("RX STD ID: 0x%03lX | Data:", CANPrintmsg.id);
 		}
 		else{
-			printf("RX EXT ID: 0x%08lX | Data:", rx_id_data_display);
+			printf("RX EXT ID: 0x%08lX | Data:", CANPrintmsg.id);
 		}
 
-		for (int i = 0; i < RxHeader.DataLength; i++)
-			printf(" %02X", RxData[i]);
+		for (int i = 0; i < CANPrintmsg.dataLength; i++)
+			printf(" %02X", CANPrintmsg.data[i]);
 
 		printf("\r\n");
 
-		osDelay(100);
 	}
 	else
 	{
-		osThreadSuspend(DataDisplayHandle);
+		osThreadSuspend(DataDisplayHandle); // Suspends the DataDisplay task
 	}
   }
   /* USER CODE END StartDataDisplay */
@@ -1100,11 +1108,13 @@ void StartCommands(void *argument)
 		case 'a':
 			{
 				osThreadSuspend(DataDisplayHandle);
+//				DISPLAY_CAN_MESSAGE = 0;
 				break;
 			}
 		case 'd':
 			{
 				osThreadResume(DataDisplayHandle);
+//				DISPLAY_CAN_MESSAGE = 1;
 				break;
 			}
 
