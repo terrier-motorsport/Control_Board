@@ -39,8 +39,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define DISPLAY_CAN_MESSAGE 1			// Turn this on/off if you want to print/ignore raw CAN Messages
-#define DISPLAY_CAN_ERRORS 1			// Turn this on/off if you want to print/ignore CAN Errors
+//#define DISPLAY_CAN_MESSAGE 1			// Turn this on/off if you want to print/ignore raw CAN Messages
+//#define DISPLAY_CAN_ERRORS 1			// Turn this on/off if you want to print/ignore CAN Errors
 
 // Pedal Calibration Inversion Constants
 #define  InvertAnalogOnePedal 0 // Swap the max and min pedal voltages on analog line one
@@ -114,11 +114,18 @@ const osMessageQueueAttr_t DisplayDataQueue_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-//uint8_t DISPLAY_CAN_MESSAGE = 1;			// Turn this on/off if you want to print/ignore raw CAN Messages
-//uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignore CAN Errors
+uint8_t DISPLAY_CAN_MESSAGE = 1;			// Turn this on/off if you want to print/ignore raw CAN Messages
+uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignore CAN Errors
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// CAN Bus /////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
+
 
 HAL_StatusTypeDef status;
 HAL_StatusTypeDef status2;
+HAL_StatusTypeDef status3;
 uint32_t txFreeLevel; // Space in TX FIFO left
 uint32_t fdcanError;
 
@@ -249,6 +256,15 @@ CANRxMessage queueBufferMessage; // Data being stored in the queue
 CANRxMessage queueBufferRecieved; // Data being read from the queue
 
 
+// System states
+enum state
+{
+	PEDAL_CALIBRATION, // Assigned 0
+	MOTOR_SPINNING, // Assigned 1
+	WATCHDOG_FAULTED // Assigned 2
+};
+
+
 /* USER CODE END 0 */
 
 /**
@@ -289,8 +305,8 @@ int main(void)
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
 
-	HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
-	HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
+  HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
+  HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
 
 
   /* USER CODE END 2 */
@@ -659,6 +675,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+
 // Callback function for data received on UART3/terminal
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -763,6 +780,11 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
+
+//	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
+//	printf("Pedal Control Started");
+
+
   /* Infinite loop */
   for(;;)
   {
@@ -845,7 +867,7 @@ void ControlPedal(void *argument)
 	  //
 	  //	printf("Unused stack: %lu words\r\n", (uint32_t)highWaterMark); // Prints how much space a task is not using
 
-	    osDelay(20);
+	    osDelay(20); // Without delay the Tx Mailbox reaches an error, most likely it fills up to quick. Needs to be checked to confirm
   }
   /* USER CODE END 5 */
 }
@@ -1008,10 +1030,42 @@ void StartCANWatchdog(void *argument)
 void StartAPPSCalibration(void *argument)
 {
   /* USER CODE BEGIN StartAPPSCalibration */
+//	float recordedVoltages[10]; // Buffer of all the pedal input voltages read so far
+//	uint8_t voltageIndex = 0; // Index on the recordedVoltages variable
+//	BSP_LED_On(LED_RED);
+	printf("APPS Calibration Started \r\n");
+	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
+//	printf("APPS Calibration Started");
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1000);
+	// Task should be suspended if the motor is spinning
+//	  BSP_LED_Toggle(LED_YELLOW);
+	  HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
+
+	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
+	  {
+		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
+//		  BSP_LED_Toggle(LED_YELLOW);
+
+	  }
+
+	  if (inputPedalVoltage > MaxPedalVoltage[0])
+	  {
+		  MaxPedalVoltage[0] = inputPedalVoltage;
+	  }
+	  else if (inputPedalVoltage < MinPedalVoltage[0])
+	  {
+		MinPedalVoltage[0] = inputPedalVoltage;
+	  }
+//	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
+//	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
+	  printf("Reading Pedal Voltage... \r\n");
+
+
+
+    osDelay(300);
   }
   /* USER CODE END StartAPPSCalibration */
 }
@@ -1078,6 +1132,7 @@ void StartDataDisplay(void *argument)
 			printf(" %02X", CANPrintmsg.data[i]);
 
 		printf("\r\n");
+//		osDelay(50);
 
 	}
 	else
@@ -1106,23 +1161,49 @@ void StartCommands(void *argument)
 	switch(serialByte) // Reads values as ascii characters; numbers need to be converted to char type before checking
 	{
 		case 'a':
-			{
-				osThreadSuspend(DataDisplayHandle);
-//				DISPLAY_CAN_MESSAGE = 0;
-				break;
-			}
+		{
+//			osThreadSuspend(DataDisplayHandle);
+			DISPLAY_CAN_MESSAGE = 0;
+			break;
+		}
 		case 'd':
-			{
-				osThreadResume(DataDisplayHandle);
-//				DISPLAY_CAN_MESSAGE = 1;
-				break;
-			}
+		{
+//			osThreadResume(DataDisplayHandle);
+			DISPLAY_CAN_MESSAGE = 1;
+			osThreadResume(DataDisplayHandle);
+			break;
+		}
+		case 'c': // Begin pedal calibration
+		{
+			DISPLAY_CAN_MESSAGE = 0;
+			printf("Starting Pedal Calibration... \r\n");
+			status3 = osThreadSuspend(PedalControlHandle); // Suspends pedal control task
+
+//			osDelay(50);
+
+			MaxPedalVoltage[0] = 0;
+			MinPedalVoltage[0] = 0;
+
+			printf("Click enter to complete calibration \r\n");
+			osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
+
+			break; // Without break, other cases below will all execute until a break statement occurs
+		}
+		case 'x': // Space bar is clicked; end pedal calibration
+		{
+			osThreadSuspend(APPSCalibrationHandle);
+			DISPLAY_CAN_MESSAGE = 1;
+			osThreadResume(PedalControlHandle);
+
+//			osThreadResume(DataDisplayHandle);
+			break;
+		}
 
 		default: break;
 	}
 	serialByte = 0;
 
-    osDelay(800);
+   osDelay(200);
   }
   /* USER CODE END StartCommands */
 }
