@@ -660,26 +660,6 @@ static void MX_FDCAN1_Init(void)
 //    	  Error_Handler();
 //      }
 
-
-      ///////////////////////////////////////////////////////////////////////////////////////////////
-      /////////////////// The Below Transmission Code should be unnecessary ////////////////////////
-      /////////////////////////////////////////////////////////////////////////////////////////////
-
-      TxHeader.Identifier  = 0x123; // ID the STM is transmitting with
-
-      // Describes how CAN frame should be transmitted
-
-      TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
-      TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
-      TxHeader.DataLength  = FDCAN_DLC_BYTES_8; // Data Length Code (DLC) -- The number of bytes in the data frame
-
-      TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
-      TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
-      TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-      TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
-      TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
-
-
       TxData[0] = 0;
       TxData[7] = 0xFF;
 
@@ -873,10 +853,6 @@ void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
 
-//	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
-//	printf("Pedal Control Started");
-
-
   /* Infinite loop */
   for(;;)
   {
@@ -890,20 +866,8 @@ void ControlPedal(void *argument)
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
-	  //	  else
-	  //	  {
-	  //		  	inputPedalVoltage = 1.5;
-	  //	  }
-	  //	  else
-	  //	  {
-	  //		  sprintf(msg, "ADC Timeout\r\n");
-	  //	  }
-	  	//inputPedalVoltage = HAL_ADC_GetValue(&hadc1); // Gets and stores ADC value from ADC1 into variable
-//	  	  snprintf(msg, sizeof(msg), "Voltage: \r\n");
-////	  	  snprintf(CANBuffer, sizeof(CANBuffer), "CAN Message: %08X	", Rx_Id)
-//	  	  status2 = HAL_UART_Transmit(&huart2, (uint8_t *)msg, sizeof(msg), HAL_MAX_DELAY); // Need to be mindefule of using max delay
 
-	  	inputPedalVoltage = 2.5;
+	  	inputPedalVoltage = 2.5; // This is just here so that I can test without a circuit; remove later
 
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
 	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
