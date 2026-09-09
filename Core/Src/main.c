@@ -102,6 +102,13 @@ const osThreadAttr_t Commands_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for readCANRX */
+osThreadId_t readCANRXHandle;
+const osThreadAttr_t readCANRX_attributes = {
+  .name = "readCANRX",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
 /* Definitions for CANRxQueue */
 osMessageQueueId_t CANRxQueueHandle;
 const osMessageQueueAttr_t CANRxQueue_attributes = {
@@ -111,6 +118,11 @@ const osMessageQueueAttr_t CANRxQueue_attributes = {
 osMessageQueueId_t DisplayDataQueueHandle;
 const osMessageQueueAttr_t DisplayDataQueue_attributes = {
   .name = "DisplayDataQueue"
+};
+/* Definitions for processCAN */
+osMessageQueueId_t processCANHandle;
+const osMessageQueueAttr_t processCAN_attributes = {
+  .name = "processCAN"
 };
 /* USER CODE BEGIN PV */
 
@@ -144,19 +156,19 @@ uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 //////////////////////////////////// Motor Controller ////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-const uint8_t MC_NodeId = 0x04; // Node ID of the MC
+const uint8_t MC_NodeId = 0x3a; // Node ID of the MC = 58
 
 // MC commands
-const uint16_t CMD_SetRelativeCurrent = (0x500 + MC_NodeId); // Set relative AC current message ID
-const uint16_t CMD_SetRelativeBrakeCurrent = (0x600 + MC_NodeId);  // Set relative AC brake current message ID
-const uint16_t CMD_SetMaxAcCurrent = (0x800 + MC_NodeId); // Set max AC current limit message ID
-const uint16_t CMD_SetMaxBrakeCurrent = (0x900 + MC_NodeId); // Set max AC brake current limit message ID
-const uint16_t CMD_SetMaxDcCurrent = (0xA + MC_NodeId); // Set max DC current limit message ID
-const uint16_t CMD_SetMaxDcBrakeCurrent = (0xB + MC_NodeId); // Set max DC brake current limit message ID
+const uint16_t CMD_SetRelativeCurrent = ((0x05 << 5) + MC_NodeId); // Set relative AC current message ID
+const uint16_t CMD_SetRelativeBrakeCurrent = ((0x06 << 5) + MC_NodeId);  // Set relative AC brake current message ID
+const uint16_t CMD_SetMaxAcCurrent = ((0x06 << 5) + MC_NodeId); // Set max AC current limit message ID
+const uint16_t CMD_SetMaxBrakeCurrent = ((0x09 << 5) + MC_NodeId); // Set max AC brake current limit message ID
+const uint16_t CMD_SetMaxDcCurrent = ((0x0A << 5) + MC_NodeId); // Set max DC current limit message ID
+const uint16_t CMD_SetMaxDcBrakeCurrent = ((0x0B << 5) + MC_NodeId); // Set max DC brake current limit message ID
 
 
 // Data from MC
-const uint16_t RCV_MC_GeneralData = (0x1F + MC_NodeId);
+const uint16_t RCV_MC_GeneralData = ((0x1F << 5) + MC_NodeId); // Using | instead of + wouldn't work here bc there would be overlap between the node ID and the packet ID
 
 // AMS Limits
 uint16_t DischargeCurrentLimit = 30; // AMS discharge current limit
@@ -204,10 +216,20 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
  uint8_t isCharging = 0;
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////// Message Display //////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
 
- ///////////////////////////////////////////////////////////////////////////////////////////////
- /////////////////////////////////// Queue Debugging //////////////////////////////////////////
- /////////////////////////////////////////////////////////////////////////////////////////////
+
+// Toggle between displaying all or select CAN messages
+uint8_t toggleCANRx = 0; // 0 = display all messages, 1 = display select messages
+uint8_t packet;
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////// Queue Debugging //////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
 
 
  uint32_t queueCount; // Amount of items in queue
@@ -229,6 +251,7 @@ void StartAPPSCalibration(void *argument);
 void StartTestCANSend(void *argument);
 void StartDataDisplay(void *argument);
 void StartCommands(void *argument);
+void StartReadingCANRX(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -257,12 +280,12 @@ CANRxMessage queueBufferRecieved; // Data being read from the queue
 
 
 // System states
-enum state
+typedef enum
 {
 	PEDAL_CALIBRATION, // Assigned 0
 	MOTOR_SPINNING, // Assigned 1
 	WATCHDOG_FAULTED // Assigned 2
-};
+} State;
 
 
 /* USER CODE END 0 */
@@ -333,6 +356,9 @@ int main(void)
   /* creation of DisplayDataQueue */
   DisplayDataQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &DisplayDataQueue_attributes);
 
+  /* creation of processCAN */
+  processCANHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &processCAN_attributes);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -355,6 +381,9 @@ int main(void)
 
   /* creation of Commands */
   CommandsHandle = osThreadNew(StartCommands, NULL, &Commands_attributes);
+
+  /* creation of readCANRX */
+  readCANRXHandle = osThreadNew(StartReadingCANRX, NULL, &readCANRX_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -535,7 +564,7 @@ static void MX_FDCAN1_Init(void)
 
   /* USER CODE BEGIN FDCAN1_Init 0 */
 
-	FDCAN_FilterTypeDef filter; // Declares filter
+	FDCAN_FilterTypeDef filter = {0}; // Declares filter
 
   /* USER CODE END FDCAN1_Init 0 */
 
@@ -557,11 +586,11 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
   hfdcan1.Init.MessageRAMOffset = 0;
-  hfdcan1.Init.StdFiltersNbr = 0;
+  hfdcan1.Init.StdFiltersNbr = 2;
   hfdcan1.Init.ExtFiltersNbr = 0;
   hfdcan1.Init.RxFifo0ElmtsNbr = 6;
   hfdcan1.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
-  hfdcan1.Init.RxFifo1ElmtsNbr = 0;
+  hfdcan1.Init.RxFifo1ElmtsNbr = 6;
   hfdcan1.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.RxBuffersNbr = 0;
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
@@ -576,7 +605,9 @@ static void MX_FDCAN1_Init(void)
   }
   /* USER CODE BEGIN FDCAN1_Init 2 */
 
-  // Sets up filter for CAN messages; Allows all messages to pass
+  // Sets up filters for CAN messages;
+  // Filter One
+  // Allows all messages to pass
 
 	  filter.IdType = FDCAN_STANDARD_ID;          // Apply this filter to 11-bit Standard IDs
 	  filter.FilterIndex = 0;                     // First slot in the filter list (0 to 27)
@@ -591,6 +622,24 @@ static void MX_FDCAN1_Init(void)
     	  // Filter configuration error
     	  Error_Handler();
       }
+
+  // Filter Two
+  // Allows only MC messages to pass
+
+//	  filter.IdType = FDCAN_STANDARD_ID;          // Apply this filter to 11-bit Standard IDs
+//	  filter.FilterIndex = 1;                     // Second slot in the filter list (0 to 27)
+//	  filter.FilterType = FDCAN_FILTER_MASK;      // Classic ID + Mask mode (replaces CAN_FILTERMODE_IDMASK)
+//	  filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1; // Route matching packets directly to FIFO1
+//	  filter.FilterID1 = MC_NodeId;                  // Only allows MC node IDs to pass
+//	  filter.FilterID2 = 0x0FF;                  // Matches the lower 8 bits to find the MC_NodeId
+
+
+//	  if (HAL_FDCAN_ConfigFilter(&hfdcan1, &filter) != HAL_OK) // checks to see if filter is configured correctly
+//      {
+//    	  // Filter configuration error
+//    	  Error_Handler();
+//      }
+
       // Starts CAN peripheral if filter config is good
       if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) // Tries to start CAN and checks for error
       {
@@ -603,6 +652,18 @@ static void MX_FDCAN1_Init(void)
       {
     	  Error_Handler();
       }
+
+
+      // Activate CAN RX notifications on FIFO1
+//      if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0) != HAL_OK) // 0 means it only focuses on Rx interrupts
+//      {
+//    	  Error_Handler();
+//      }
+
+
+      ///////////////////////////////////////////////////////////////////////////////////////////////
+      /////////////////// The Below Transmission Code should be unnecessary ////////////////////////
+      /////////////////////////////////////////////////////////////////////////////////////////////
 
       TxHeader.Identifier  = 0x123; // ID the STM is transmitting with
 
@@ -706,12 +767,43 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 	 CANmsg.id = RxHeader.Identifier;
 	 CANmsg.idType = RxHeader.IdType;
 	 CANmsg.dataLength = RxHeader.DataLength;
-	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here sine array assignment can't be done, plus it would become a pointer
-	 queueBufferMessage = CANmsg;
-	 queueStatus = osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
+	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here since array assignment can't be done, plus it would become a pointer
+//	 queueBufferMessage = CANmsg;
+	 osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
+	 osMessageQueuePut(processCANHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
 
 }
+
+
+// Callback function for data received on FIFO1
+//void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
+//{
+//
+//	 if((RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) != RESET)
+//	 {
+//		 /* Retrieve Rx messages from RX FIFO1 */
+//		 if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO1, &RxHeader, RxData) != HAL_OK)
+//		 {
+//			 // Reception Error; error thrown if the receive fails
+//			 Error_Handler();
+//		 }
+//	 }
+//
+//	 CANRxMessage selectReadCAN;
+//	 selectReadCAN.id = RxHeader.Identifier;
+//	 selectReadCAN.idType = RxHeader.IdType;
+//	 selectReadCAN.dataLength = RxHeader.DataLength;
+//	 memcpy(selectReadCAN.data, RxData, 8); // Passes a copy of RxData to readCAN.data; '=' would not work here sine array assignment can't be done, plus it would become a pointer
+//	 queueBufferMessage = selectReadCAN;
+//
+//	 // Uses queue for all CAN messages if CANRxToggle = 0
+//	 if (toggleCANRx)
+//	 {
+//		 queueStatus = osMessageQueuePut(DisplayDataQueueHandle, &selectReadCAN, 0, 0); // Adds received CAN message to readCAN queue
+//	 }
+//
+//}
 
 
 // CAN Transmit Function
@@ -838,8 +930,8 @@ void ControlPedal(void *argument)
 
 	  		CalculatedValue = ((inputPedalVoltage - MinPedalVoltage[0]) / (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000;
 
-	  		TxData[0] = (CalculatedValue >> 8) & 0xFF;   // 0x00
-	  		TxData[1] = CalculatedValue & 0xFF;          // 0xc8
+	  		TxData[0] = (CalculatedValue >> 8) & 0xFF;   // 0x00; Shifts the value to the right by 1 byte, allowing only 0s to be read with masking
+	  		TxData[1] = CalculatedValue & 0xFF;          // 0xc8; Only reads the actual value
 	  	}
 	  	else
 	  	{
@@ -894,7 +986,7 @@ void StartCANWatchdog(void *argument)
 	 queueBufferRecieved = CANmsg;
 	 // Throw a lil delay to let the CAN message go thru
 //	 osDelay(50);
-
+	 packet = CANmsg.id & 0xFF;
 	    // Based on the CAN ID, determines what ECU sent the message, and update the time that
 	    // the ECU sent it's message, as well as resetting any error
 	     switch(CANmsg.id)
@@ -938,7 +1030,7 @@ void StartCANWatchdog(void *argument)
 	 			break;
 
 	 		// MC Message
-	         case 0x41A:
+	         case 0x41A: // 0x41A -> 0x1F MC message; Using node ID 58, 0x41A - 0x3A (58 in decimal) = 0x3E0 -> 0x3E0 >> 5 = 31 in decimal = 0x1F
 	         	lastMcMessage = lastMessage;
 	 			mcError = 0;
 	 			break;
@@ -1050,6 +1142,10 @@ void StartAPPSCalibration(void *argument)
 //		  BSP_LED_Toggle(LED_YELLOW);
 
 	  }
+	  else
+	  {
+		  BSP_LED_Toggle(LED_RED);
+	  }
 
 	  if (inputPedalVoltage > MaxPedalVoltage[0])
 	  {
@@ -1093,7 +1189,9 @@ void StartTestCANSend(void *argument)
 //	 osDelay(50);
 	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
 //	 osDelay(50);
-	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
+//	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
+
+	 CAN_Send(RCV_MC_GeneralData, WatchDogTxData, 8); // General MC data
 
 	 osDelay(50);
   }
@@ -1175,6 +1273,11 @@ void StartCommands(void *argument)
 		}
 		case 'c': // Begin pedal calibration
 		{
+			if (MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
+			{
+				break;
+			}
+
 			DISPLAY_CAN_MESSAGE = 0;
 			printf("Starting Pedal Calibration... \r\n");
 			status3 = osThreadSuspend(PedalControlHandle); // Suspends pedal control task
@@ -1192,12 +1295,18 @@ void StartCommands(void *argument)
 		case 'x': // Space bar is clicked; end pedal calibration
 		{
 			osThreadSuspend(APPSCalibrationHandle);
+			printf("Ending Pedal Calibration...");
 			DISPLAY_CAN_MESSAGE = 1;
 			osThreadResume(PedalControlHandle);
 
 //			osThreadResume(DataDisplayHandle);
 			break;
 		}
+//		case 't': // Toggles display variable for displaying CAN messages
+//		{
+//			toggleCANRx = !toggleCANRx; // toggles the value of toggleCANRx; 0 -> 1, 1 -> 0
+//			break;
+//		}
 
 		default: break;
 	}
@@ -1206,6 +1315,42 @@ void StartCommands(void *argument)
    osDelay(200);
   }
   /* USER CODE END StartCommands */
+}
+
+/* USER CODE BEGIN Header_StartReadingCANRX */
+/**
+* @brief Function implementing the readCANRX thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartReadingCANRX */
+void StartReadingCANRX(void *argument)
+{
+  /* USER CODE BEGIN StartReadingCANRX */
+  /* Infinite loop */
+  for(;;)
+  {
+//	CANRxMessage readCAN;
+//	osMessageQueueGet(processCANHandle, &readCAN, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
+//
+//	if((readCAN.id & 0xFF) == MC_NodeId) // Checks if an MC message was received
+//	{
+//		// Relevant MC messages
+//		switch(readCAN.id >> 5) // Need to get this to be the
+//		{
+//			case 0x20: // General MC message
+//			{
+//				BSP_LED_Toggle(LED_YELLOW);
+//				break;
+//			}
+//			default:
+//				break;
+//		}
+//	}
+
+    osDelay(1);
+  }
+  /* USER CODE END StartReadingCANRX */
 }
 
  /* MPU Configuration */
