@@ -834,7 +834,7 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 
 // Function to check if a certain message was received over the last half second
 uint8_t lastMessageSent(uint32_t lastMessage){
-	if ((HAL_GetTick() - lastMessage) >= 3000) { // 3 seconds?
+	if ((HAL_GetTick() - lastMessage) >= 3000) {
 		return 1;
 	}
 	return 0;

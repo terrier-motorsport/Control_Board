@@ -1,6 +1,6 @@
 ################################################################################
 # Automatically-generated file. Do not edit!
-# Toolchain: GNU Tools for STM32 (13.3.rel1)
+# Toolchain: GNU Tools for STM32 (14.3.rel1)
 ################################################################################
 
 -include ../makefile.init
@@ -66,8 +66,8 @@ all: main-build
 main-build: Control_Board.elf secondary-outputs
 
 # Tool invocations
-Control_Board.elf Control_Board.map: $(OBJS) $(USER_OBJS) C:\Users\alvin\Desktop\2026-27\BUTM\Control_Board\STM32H723ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Control_Board.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\alvin\Desktop\2026-27\BUTM\Control_Board\STM32H723ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Control_Board.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Control_Board.elf Control_Board.map: $(OBJS) $(USER_OBJS) C:\Users\grayt\STM32CubeMX\Control_Board\STM32H723ZGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Control_Board.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\grayt\STM32CubeMX\Control_Board\STM32H723ZGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Control_Board.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
