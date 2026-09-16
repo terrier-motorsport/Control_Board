@@ -1246,7 +1246,7 @@ void StartCommands(void *argument)
 		}
 		case 'c': // Begin pedal calibration
 		{
-			if (MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
+			if (currentState == MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
 			{
 				break;
 			}
