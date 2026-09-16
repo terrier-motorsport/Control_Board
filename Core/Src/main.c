@@ -1277,8 +1277,11 @@ void StartCommands(void *argument)
 
 //			osDelay(50);
 
-			MaxPedalVoltage[0] = 0;
-			MinPedalVoltage[0] = 0;
+      // start at the opposite end and calibrate towards the desired end 
+      // 0.0 --up--> max 
+      // 3.3 -down-> min
+			MaxPedalVoltage[0] = 0.0f;
+			MinPedalVoltage[0] = 3.3f;
 
 			printf("Click enter to complete calibration \r\n");
 			osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
