@@ -288,6 +288,9 @@ typedef enum
 	WATCHDOG_FAULTED // Assigned 2
 } State;
 
+State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
+
+
 
 /* USER CODE END 0 */
 
