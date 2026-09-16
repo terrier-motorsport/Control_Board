@@ -185,6 +185,7 @@ float PedalDeadband = 0.15; // Percent deadband of pedal
 
 uint32_t lastThrottleOrBrake = 0; // Gets the time at which a throttle or break CAN message is sent
 
+float testPedalVoltage = 2.5; // temporary test before circuit test implemented
 float inputPedalVoltage = 0; // voltage that the APPS is outputting to the STM
 char msg[20];
 char CANBuffer[100]; // Buffer used to display CAN messages on terminal
@@ -849,6 +850,9 @@ uint8_t lastMessageSent(uint32_t lastMessage){
   * @retval None
   */
 /* USER CODE END Header_ControlPedal */
+
+#define TEST_MODE // comment out when test circuit implemented
+
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
@@ -856,6 +860,10 @@ void ControlPedal(void *argument)
   /* Infinite loop */
   for(;;)
   {
+
+#ifdef TEST_MODE
+      inputPedalVoltage = testPedalVoltage;
+#else
 	  //	UBaseType_t highWaterMark;
 
 	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
@@ -866,9 +874,7 @@ void ControlPedal(void *argument)
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
-
-	  	inputPedalVoltage = 2.5; // This is just here so that I can test without a circuit; remove later
-
+#endif
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
 	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
 	  	{
