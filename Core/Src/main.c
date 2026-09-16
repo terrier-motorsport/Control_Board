@@ -288,9 +288,29 @@ typedef enum
 	WATCHDOG_FAULTED // Assigned 2
 } State;
 
-State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
+volatile State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
 
+/*  More realistic states for future implementation
 
+typedef enum
+{
+  STATE_INIT,
+  STATE_WAITING_FOR_ECUS,
+  STATE_READY,
+  STATE_RUNNING,
+  STATE_APPS_CALIBRATION,
+  STATE_CHARGING,
+  STATE_FAULT
+} SystemState;
+
+SystemState currentState = STATE_INIT;
+
+// helper function to change state for consistency
+void setSysState(SystemState newState){
+  currentState = newState;
+}
+
+*/
 
 /* USER CODE END 0 */
 
