@@ -141,6 +141,9 @@ HAL_StatusTypeDef status3;
 uint32_t txFreeLevel; // Space in TX FIFO left
 uint32_t fdcanError;
 
+
+// global var used by many rtos tasks
+// risk of race condition
 FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the transmitted frame
 FDCAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
 
@@ -204,7 +207,12 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
  uint32_t lastMcMessage = 0;
  uint32_t lastChargerMessage = 0;
 
- uint32_t lastMessage = 0;
+ uint8_t temSeen = 0;
+ uint8_t amsSeen = 0;
+ uint8_t mcSeen = 0;
+ uint8_t chargerSeen = 0;
+
+// uint32_t lastMessage = 0;
 
  // Initializes flags to indicate when a certain ECU hasn't sent a message in a second, timing out
 // uint8_t heartBeatError = 0;
@@ -766,13 +774,60 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 		 }
 	 }
 
-	 lastMessage = HAL_GetTick();
-	 CANRxMessage CANmsg;
+//	 lastMessage = HAL_GetTick();
+	 
+   uint32_t now = HAL_GetTick();
+
+   CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
 	 CANmsg.idType = RxHeader.IdType;
 	 CANmsg.dataLength = RxHeader.DataLength;
 	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here since array assignment can't be done, plus it would become a pointer
 //	 queueBufferMessage = CANmsg;
+
+   switch (CANmsg.id){
+    case 0x080:
+      lastTemMessage = now;
+      temSeen = 1;
+      break;
+
+    case 0x7E3:
+      lastAmsMessage = now;
+      amsSeen = 1;
+
+      if (CANmsg.data[0] == 0xFF){
+        isCharging = 1;
+        
+        if (DISPLAY_CAN_ERRORS){
+          if (CANmsg.data[1] != 0x00){
+            printf("AMS CAN Charging Message is Corrupt.\r\n");
+            fflush(stdout);
+          }
+        }
+      } else if (CANmsg.data[0] == 0x00){
+        isCharging = 0;
+
+        if (DISPLAY_CAN_ERRORS){
+          if (CANmsg.data[1] != 0xFF){
+            printf("AMS CAN Charging Message is Corrupt.\r\n");
+            fflush(stdout);
+          }
+        }
+      }
+
+      break;
+
+    case 0x41A:
+      lastMcMessage = now;
+      mcSeen = 1;
+      break;
+
+    case 0x18FF50E5:
+      lastChargerMessage = now;
+      chargerSeen = 1;
+      break;
+   }
+
 	 osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(processCANHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
@@ -858,7 +913,7 @@ HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 
 // Function to check if a certain message was received over the last half second
 uint8_t lastMessageSent(uint32_t lastMessage){
-	if ((HAL_GetTick() - lastMessage) >= 3000) {
+	if ((HAL_GetTick() - lastMessage) >= 500) { // 500ms = 0.5s
 		return 1;
 	}
 	return 0;
@@ -970,11 +1025,63 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
+    temError = lastMessageSent(lastTemMessage);
+    amsError = lastMessageSent(lastAmsMessage);
+    mcError = lastMessageSent(lastMcMessage);
+
+    if (isCharging){
+      chargerError = lastMessageSent(lastChargerMessage);
+    } else {
+      chargerError = 0;
+    }
+
+    if (temError || amsError || mcError || chargerError){
+      BSP_LED_On(LED_RED);
+      BSP_LED_Off(LED_GREEN);
+
+      // Displays to the console any errors
+	    if(DISPLAY_CAN_ERRORS){
+//			  if(heartBeatError)
+//			  {
+//				  printf("Heartbeat message not received within a second.\r\n");
+//				  fflush(stdout);
+//			  }
+        if(temError)
+        {
+          printf("TEM message not received within a second.\r\n");
+          fflush(stdout);
+        }
+        if(amsError)
+        {
+          printf("AMS message not received within a second.\r\n");
+          fflush(stdout);
+        }
+        if(mcError)
+        {
+          printf("MC message not received within a second.\r\n");
+          fflush(stdout);
+        }
+        if(chargerError)
+        {
+          printf("Charger message not received within a second.\r\n");
+          fflush(stdout);
+        }
+	    }
+    } else {
+      BSP_LED_Off(LED_RED);
+      BSP_LED_On(LED_GREEN);
+    }
+
+    osDelay(100);
+// the following watchdog relies on receiving messages from osMessageQueueGet()
+// if nothing arrives (i.e., all ECUs are dead) it will stop functioning
+/*
 	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
 	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
 	 CANRxMessage CANmsg;
 	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
+
 
 	 queueBufferRecieved = CANmsg;
 	 // Throw a lil delay to let the CAN message go thru
@@ -1101,6 +1208,7 @@ void StartCANWatchdog(void *argument)
    	 }
 
 //    osDelay(20);
+*/
   }
   /* USER CODE END StartCANWatchdog */
 }
