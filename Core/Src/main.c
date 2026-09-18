@@ -214,7 +214,7 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
 
 // uint32_t lastMessage = 0;
 
- // Initializes flags to indicate when a certain ECU hasn't sent a message in a second, timing out
+ // Initializes flags to indicate when a certain ECU hasn't sent a message in 500ms, timing out
 // uint8_t heartBeatError = 0;
  uint8_t temError = 0;
  uint8_t amsError = 0;
@@ -267,7 +267,7 @@ void StartReadingCANRX(void *argument);
 // Prototype for CAN Transmission
 HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length);
 
-// Prototype to see if a certain message hasn't been seen in over a second
+// Prototype to see if a certain message hasn't been seen in over 500ms
 uint8_t lastMessageSent(uint32_t lastMessage);
 
 /* USER CODE END PFP */
@@ -868,47 +868,50 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 // CAN Transmit Function
 HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 {
-//    CAN_TxHeaderTypeDef TxHeader;
+    // local to the function; see global declaration comments
+    FDCAN_TxHeaderTypeDef txHeader = {0};
+//    CAN_TxHeaderTypeDef txHeader;
 //    uint32_t TxMailbox;
-	  TxHeader.Identifier = id;
-	  TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
-	  TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
+	  txHeader.Identifier = id;
+	  txHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
+	  txHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
 
 	  switch (length)
 	  {
-	      case 0: TxHeader.DataLength = FDCAN_DLC_BYTES_0; break; // Data Length Code (DLC) -- The number of bytes in the data frame
-	      case 1: TxHeader.DataLength = FDCAN_DLC_BYTES_1; break;
-	      case 2: TxHeader.DataLength = FDCAN_DLC_BYTES_2; break;
-	      case 3: TxHeader.DataLength = FDCAN_DLC_BYTES_3; break;
-	      case 4: TxHeader.DataLength = FDCAN_DLC_BYTES_4; break;
-	      case 5: TxHeader.DataLength = FDCAN_DLC_BYTES_5; break;
-	      case 6: TxHeader.DataLength = FDCAN_DLC_BYTES_6; break;
-	      case 7: TxHeader.DataLength = FDCAN_DLC_BYTES_7; break;
-	      case 8: TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
+	      case 0: txHeader.DataLength = FDCAN_DLC_BYTES_0; break; // Data Length Code (DLC) -- The number of bytes in the data frame
+	      case 1: txHeader.DataLength = FDCAN_DLC_BYTES_1; break;
+	      case 2: txHeader.DataLength = FDCAN_DLC_BYTES_2; break;
+	      case 3: txHeader.DataLength = FDCAN_DLC_BYTES_3; break;
+	      case 4: txHeader.DataLength = FDCAN_DLC_BYTES_4; break;
+	      case 5: txHeader.DataLength = FDCAN_DLC_BYTES_5; break;
+	      case 6: txHeader.DataLength = FDCAN_DLC_BYTES_6; break;
+	      case 7: txHeader.DataLength = FDCAN_DLC_BYTES_7; break;
+	      case 8: txHeader.DataLength = FDCAN_DLC_BYTES_8; break;
 
 	      default:
 	          // Invalid CAN payload length
-	    	  TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
+	    	  txHeader.DataLength = FDCAN_DLC_BYTES_8; break;
 	          break;
 	  }
 
-	  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
-	  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
-	  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-	  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
-	  TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
+	  txHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
+	  txHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
+	  txHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+	  txHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
+	  txHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
 
 
 	  txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
-	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data)) != HAL_OK) // Wait till a Tx mailbox is free.
+	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, data)) != HAL_OK) // Wait till a Tx mailbox is free.
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 	  		osDelay(50); // Give back control to scheduler for 1ms
 
 	  	}
-//    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
-	  	return 0;
+//    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, data);
+//           --> status2
+	  	return status2;
 }
 
 // Function to check if a certain message was received over the last half second
@@ -934,6 +937,16 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  FDCAN_TxHeaderTypeDef pedalTxHeader = {0};
+
+  pedalTxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  pedalTxHeader.IdType = FDCAN_STANDARD_ID;
+  pedalTxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  pedalTxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  pedalTxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  pedalTxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  pedalTxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  pedalTxHeader.MessageMarker = 0;
 
   /* Infinite loop */
   for(;;)
@@ -958,7 +971,7 @@ void ControlPedal(void *argument)
 	  	{
 	  		//TxData[0]++; // Increment the first byte
 
-	  		TxHeader.Identifier = CMD_SetRelativeCurrent; // ID the STM is transmitting with
+	  		pedalTxHeader.Identifier = CMD_SetRelativeCurrent; // ID the STM is transmitting with
 
 	  		CalculatedValue = ((inputPedalVoltage - CenterPedalVoltage[0]) / (MaxPedalVoltage[0] - CenterPedalVoltage[0])) * 1000;
 
@@ -974,7 +987,7 @@ void ControlPedal(void *argument)
 	  	}
 	  	else if (inputPedalVoltage < CenterPedalVoltage[0] && inputPedalVoltage >= MinPedalVoltage[0]) // Checks if the car is braking and is not faulted
 	  	{
-	  		TxHeader.Identifier = CMD_SetRelativeBrakeCurrent; // ID the STM is transmitting with
+	  		pedalTxHeader.Identifier = CMD_SetRelativeBrakeCurrent; // ID the STM is transmitting with
 
 	  		CalculatedValue = ((inputPedalVoltage - MinPedalVoltage[0]) / (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000;
 
@@ -983,7 +996,7 @@ void ControlPedal(void *argument)
 	  	}
 	  	else
 	  	{
-	  		TxHeader.Identifier = 0x111;
+	  		pedalTxHeader.Identifier = 0x111;
 
 	  		TxData[0] = 0xFF;   // 0x00
 	  		TxData[1] = 0xFF;
@@ -993,7 +1006,7 @@ void ControlPedal(void *argument)
   		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 
 
-	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &pedalTxHeader, TxData)) != HAL_OK) // Wait till a Tx mailbox is free.
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
@@ -1043,27 +1056,27 @@ void StartCANWatchdog(void *argument)
 	    if(DISPLAY_CAN_ERRORS){
 //			  if(heartBeatError)
 //			  {
-//				  printf("Heartbeat message not received within a second.\r\n");
+//				  printf("Heartbeat message not received within 500ms.\r\n");
 //				  fflush(stdout);
 //			  }
         if(temError)
         {
-          printf("TEM message not received within a second.\r\n");
+          printf("TEM message not received within 500ms.\r\n");
           fflush(stdout);
         }
         if(amsError)
         {
-          printf("AMS message not received within a second.\r\n");
+          printf("AMS message not received within 500ms.\r\n");
           fflush(stdout);
         }
         if(mcError)
         {
-          printf("MC message not received within a second.\r\n");
+          printf("MC message not received within 500ms.\r\n");
           fflush(stdout);
         }
         if(chargerError)
         {
-          printf("Charger message not received within a second.\r\n");
+          printf("Charger message not received within 500ms.\r\n");
           fflush(stdout);
         }
 	    }
@@ -1173,27 +1186,27 @@ void StartCANWatchdog(void *argument)
 		 {
 //			 if(heartBeatError)
 //			 {
-//				 printf("Heartbeat message not received within a second.\r\n");
+//				 printf("Heartbeat message not received within 500ms.\r\n");
 //				 fflush(stdout);
 //			 }
 			 if(temError)
 			 {
-				 printf("TEM message not received within a second.\r\n");
+				 printf("TEM message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(amsError)
 			 {
-				 printf("AMS message not received within a second.\r\n");
+				 printf("AMS message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(mcError)
 			 {
-				 printf("MC message not received within a second.\r\n");
+				 printf("MC message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(chargerError)
 			 {
-				 printf("Charger message not received within a second.\r\n");
+				 printf("Charger message not received within 500ms.\r\n");
 				 fflush(stdout);
 		 	 }
 	 	 }
@@ -1239,7 +1252,7 @@ void StartAPPSCalibration(void *argument)
 
 	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  {
-		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
+		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
 //		  BSP_LED_Toggle(LED_YELLOW);
 
 	  }
@@ -1256,8 +1269,8 @@ void StartAPPSCalibration(void *argument)
 	  {
 		MinPedalVoltage[0] = inputPedalVoltage;
 	  }
-//	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
-//	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
+	  // printf("Max Pedal Voltage: %.3f ", MaxPedalVoltage[0]);
+	  // printf("Min Pedal Voltage: %.3f ", MinPedalVoltage[0]);
 	  printf("Reading Pedal Voltage... \r\n");
 
 
