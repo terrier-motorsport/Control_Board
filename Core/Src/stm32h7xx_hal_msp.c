@@ -85,13 +85,12 @@ void HAL_MspInit(void)
   */
 void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-  if(hadc->Instance==ADC1)
+  if(hadc->Instance==ADC3)
   {
-    /* USER CODE BEGIN ADC1_MspInit 0 */
+    /* USER CODE BEGIN ADC3_MspInit 0 */
 
-    /* USER CODE END ADC1_MspInit 0 */
+    /* USER CODE END ADC3_MspInit 0 */
 
   /** Initializes the peripherals clock
   */
@@ -111,20 +110,17 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
     }
 
     /* Peripheral clock enable */
-    __HAL_RCC_ADC12_CLK_ENABLE();
+    __HAL_RCC_ADC3_CLK_ENABLE();
 
-    __HAL_RCC_GPIOF_CLK_ENABLE();
-    /**ADC1 GPIO Configuration
-    PF11     ------> ADC1_INP2
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    /**ADC3 GPIO Configuration
+    PC2_C     ------> ADC3_INP0
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_11;
-    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+    HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PC2, SYSCFG_SWITCH_PC2_OPEN);
 
-    /* USER CODE BEGIN ADC1_MspInit 1 */
+    /* USER CODE BEGIN ADC3_MspInit 1 */
 
-    /* USER CODE END ADC1_MspInit 1 */
+    /* USER CODE END ADC3_MspInit 1 */
 
   }
 
@@ -138,22 +134,17 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
   */
 void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
 {
-  if(hadc->Instance==ADC1)
+  if(hadc->Instance==ADC3)
   {
-    /* USER CODE BEGIN ADC1_MspDeInit 0 */
+    /* USER CODE BEGIN ADC3_MspDeInit 0 */
 
-    /* USER CODE END ADC1_MspDeInit 0 */
+    /* USER CODE END ADC3_MspDeInit 0 */
     /* Peripheral clock disable */
-    __HAL_RCC_ADC12_CLK_DISABLE();
+    __HAL_RCC_ADC3_CLK_DISABLE();
 
-    /**ADC1 GPIO Configuration
-    PF11     ------> ADC1_INP2
-    */
-    HAL_GPIO_DeInit(GPIOF, GPIO_PIN_11);
+    /* USER CODE BEGIN ADC3_MspDeInit 1 */
 
-    /* USER CODE BEGIN ADC1_MspDeInit 1 */
-
-    /* USER CODE END ADC1_MspDeInit 1 */
+    /* USER CODE END ADC3_MspDeInit 1 */
   }
 
 }

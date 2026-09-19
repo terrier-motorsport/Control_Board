@@ -56,7 +56,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 COM_InitTypeDef BspCOMInit;
-ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc3;
 
 FDCAN_HandleTypeDef hfdcan1;
 
@@ -135,7 +135,7 @@ uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignor
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 
-HAL_StatusTypeDef status;
+HAL_StatusTypeDef adcStatus;
 HAL_StatusTypeDef status2;
 HAL_StatusTypeDef status3;
 uint32_t txFreeLevel; // Space in TX FIFO left
@@ -243,8 +243,8 @@ uint8_t packet;
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_FDCAN1_Init(void);
+static void MX_ADC3_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
@@ -324,8 +324,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ADC1_Init();
   MX_FDCAN1_Init();
+  MX_ADC3_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
@@ -486,71 +486,65 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief ADC1 Initialization Function
+  * @brief ADC3 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_ADC1_Init(void)
+static void MX_ADC3_Init(void)
 {
 
-  /* USER CODE BEGIN ADC1_Init 0 */
+  /* USER CODE BEGIN ADC3_Init 0 */
 
-  /* USER CODE END ADC1_Init 0 */
+  /* USER CODE END ADC3_Init 0 */
 
-  ADC_MultiModeTypeDef multimode = {0};
   ADC_ChannelConfTypeDef sConfig = {0};
 
-  /* USER CODE BEGIN ADC1_Init 1 */
+  /* USER CODE BEGIN ADC3_Init 1 */
 
-  /* USER CODE END ADC1_Init 1 */
+  /* USER CODE END ADC3_Init 1 */
 
   /** Common config
   */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc1.Init.Resolution = ADC_RESOLUTION_16B;
-  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-  hadc1.Init.OversamplingMode = DISABLE;
-  hadc1.Init.Oversampling.Ratio = 1;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure the ADC multi-mode
-  */
-  multimode.Mode = ADC_MODE_INDEPENDENT;
-  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  hadc3.Instance = ADC3;
+  hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc3.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc3.Init.DataAlign = ADC3_DATAALIGN_RIGHT;
+  hadc3.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc3.Init.LowPowerAutoWait = DISABLE;
+  hadc3.Init.ContinuousConvMode = DISABLE;
+  hadc3.Init.NbrOfConversion = 1;
+  hadc3.Init.DiscontinuousConvMode = DISABLE;
+  hadc3.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc3.Init.DMAContinuousRequests = DISABLE;
+  hadc3.Init.SamplingMode = ADC_SAMPLING_MODE_NORMAL;
+  hadc3.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc3.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc3.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+  hadc3.Init.OversamplingMode = DISABLE;
+  hadc3.Init.Oversampling.Ratio = ADC3_OVERSAMPLING_RATIO_2;
+  if (HAL_ADC_Init(&hadc3) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
+  sConfig.SamplingTime = ADC3_SAMPLETIME_92CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
-  sConfig.OffsetSignedSaturation = DISABLE;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  sConfig.OffsetSign = ADC3_OFFSET_SIGN_NEGATIVE;
+  if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN ADC1_Init 2 */
+  /* USER CODE BEGIN ADC3_Init 2 */
 
-  /* USER CODE END ADC1_Init 2 */
+  /* USER CODE END ADC3_Init 2 */
 
 }
 
@@ -682,7 +676,6 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -857,17 +850,17 @@ void ControlPedal(void *argument)
   for(;;)
   {
 	  //	UBaseType_t highWaterMark;
-
-	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
+//	  	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+	  	HAL_ADC_Start(&hadc3); // Starts ADC1 on STM32
 	  //	HAL_ADC_PollForConversion(&hadc1, 20); // ADC data collected via polling with timeout of 20 units
-	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
+	  	  if ((adcStatus = HAL_ADC_PollForConversion(&hadc3, 20) == HAL_OK))
 	  	  {
-	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
+	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc3)) * (3.3 / 4095);
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
 
-	  	inputPedalVoltage = 2.5; // This is just here so that I can test without a circuit; remove later
+//	  	inputPedalVoltage = 2.5; // This is just here so that I can test without a circuit; remove later
 
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
 	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
@@ -902,14 +895,14 @@ void ControlPedal(void *argument)
 	  		TxHeader.Identifier = 0x111;
 
 	  		TxData[0] = 0xFF;   // 0x00
-	  		TxData[1] = 0xFF;
+	  		TxData[1] = 0x66;
 	  	}
 
-  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
-  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
+//  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+//  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 
 
-	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	while ((HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)) // Wait till a Tx mailbox is free.
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
@@ -1027,10 +1020,10 @@ void StartCANWatchdog(void *argument)
 	 // If any of the error flags are high, Shut the relay down
 	 if(temError + amsError + mcError + chargerError)
 	 {
-		 BSP_LED_On(LED_RED); // This turns the LED on
-		 BSP_LED_Off(LED_GREEN);
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED on
-//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+//		 BSP_LED_On(LED_RED); // This turns the LED on
+//		 BSP_LED_Off(LED_GREEN);
+		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
+		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
 
 		 // Displays to the console any errors
 		 if(DISPLAY_CAN_ERRORS)
@@ -1064,11 +1057,11 @@ void StartCANWatchdog(void *argument)
 	 }
 	 else
 	 {
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
 
-		 BSP_LED_Off(LED_RED);
-		 BSP_LED_On(LED_GREEN);
+//		 BSP_LED_Off(LED_RED);
+//		 BSP_LED_On(LED_GREEN);
    	 }
 
 //    osDelay(20);
@@ -1089,7 +1082,7 @@ void StartAPPSCalibration(void *argument)
 //	float recordedVoltages[10]; // Buffer of all the pedal input voltages read so far
 //	uint8_t voltageIndex = 0; // Index on the recordedVoltages variable
 //	BSP_LED_On(LED_RED);
-	printf("APPS Calibration Started \r\n");
+//	printf("APPS Calibration Started \r\n");
 	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
 //	printf("APPS Calibration Started");
 
@@ -1098,30 +1091,30 @@ void StartAPPSCalibration(void *argument)
   {
 	// Task should be suspended if the motor is spinning
 //	  BSP_LED_Toggle(LED_YELLOW);
-	  HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
-
-	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
-	  {
-		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
-//		  BSP_LED_Toggle(LED_YELLOW);
-
-	  }
-	  else
-	  {
-		  BSP_LED_Toggle(LED_RED);
-	  }
-
-	  if (inputPedalVoltage > MaxPedalVoltage[0])
-	  {
-		  MaxPedalVoltage[0] = inputPedalVoltage;
-	  }
-	  else if (inputPedalVoltage < MinPedalVoltage[0])
-	  {
-		MinPedalVoltage[0] = inputPedalVoltage;
-	  }
-//	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
-//	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
-	  printf("Reading Pedal Voltage... \r\n");
+//	  HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
+//
+//	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
+//	  {
+//		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
+////		  BSP_LED_Toggle(LED_YELLOW);
+//
+//	  }
+//	  else
+//	  {
+//		  BSP_LED_Toggle(LED_RED);
+//	  }
+//
+//	  if (inputPedalVoltage > MaxPedalVoltage[0])
+//	  {
+//		  MaxPedalVoltage[0] = inputPedalVoltage;
+//	  }
+//	  else if (inputPedalVoltage < MinPedalVoltage[0])
+//	  {
+//		MinPedalVoltage[0] = inputPedalVoltage;
+//	  }
+////	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
+////	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
+//	  printf("Reading Pedal Voltage... \r\n");
 
 
 
