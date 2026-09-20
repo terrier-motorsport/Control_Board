@@ -56,7 +56,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 COM_InitTypeDef BspCOMInit;
-ADC_HandleTypeDef hadc3;
+ADC_HandleTypeDef hadc1;
 
 FDCAN_HandleTypeDef hfdcan1;
 
@@ -135,12 +135,15 @@ uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignor
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 
-HAL_StatusTypeDef adcStatus;
+HAL_StatusTypeDef status;
 HAL_StatusTypeDef status2;
 HAL_StatusTypeDef status3;
 uint32_t txFreeLevel; // Space in TX FIFO left
 uint32_t fdcanError;
 
+
+// global var used by many rtos tasks
+// risk of race condition
 FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the transmitted frame
 FDCAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
 
@@ -185,6 +188,7 @@ float PedalDeadband = 0.15; // Percent deadband of pedal
 
 uint32_t lastThrottleOrBrake = 0; // Gets the time at which a throttle or break CAN message is sent
 
+float testPedalVoltage = 2.5; // temporary test before circuit test implemented
 float inputPedalVoltage = 0; // voltage that the APPS is outputting to the STM
 char msg[20];
 char CANBuffer[100]; // Buffer used to display CAN messages on terminal
@@ -203,9 +207,14 @@ uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
  uint32_t lastMcMessage = 0;
  uint32_t lastChargerMessage = 0;
 
- uint32_t lastMessage = 0;
+ uint8_t temSeen = 0;
+ uint8_t amsSeen = 0;
+ uint8_t mcSeen = 0;
+ uint8_t chargerSeen = 0;
 
- // Initializes flags to indicate when a certain ECU hasn't sent a message in a second, timing out
+// uint32_t lastMessage = 0;
+
+ // Initializes flags to indicate when a certain ECU hasn't sent a message in 500ms, timing out
 // uint8_t heartBeatError = 0;
  uint8_t temError = 0;
  uint8_t amsError = 0;
@@ -243,8 +252,8 @@ uint8_t packet;
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_ADC1_Init(void);
 static void MX_FDCAN1_Init(void);
-static void MX_ADC3_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
@@ -258,7 +267,7 @@ void StartReadingCANRX(void *argument);
 // Prototype for CAN Transmission
 HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length);
 
-// Prototype to see if a certain message hasn't been seen in over a second
+// Prototype to see if a certain message hasn't been seen in over 500ms
 uint8_t lastMessageSent(uint32_t lastMessage);
 
 /* USER CODE END PFP */
@@ -287,6 +296,29 @@ typedef enum
 	WATCHDOG_FAULTED // Assigned 2
 } State;
 
+volatile State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
+
+/*  More realistic states for future implementation
+
+typedef enum
+{
+  STATE_INIT,
+  STATE_WAITING_FOR_ECUS,
+  STATE_READY,
+  STATE_RUNNING,
+  STATE_APPS_CALIBRATION,
+  STATE_CHARGING,
+  STATE_FAULT
+} SystemState;
+
+SystemState currentState = STATE_INIT;
+
+// helper function to change state for consistency
+void setSysState(SystemState newState){
+  currentState = newState;
+}
+
+*/
 
 /* USER CODE END 0 */
 
@@ -324,8 +356,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_ADC1_Init();
   MX_FDCAN1_Init();
-  MX_ADC3_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
@@ -486,65 +518,71 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief ADC3 Initialization Function
+  * @brief ADC1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_ADC3_Init(void)
+static void MX_ADC1_Init(void)
 {
 
-  /* USER CODE BEGIN ADC3_Init 0 */
+  /* USER CODE BEGIN ADC1_Init 0 */
 
-  /* USER CODE END ADC3_Init 0 */
+  /* USER CODE END ADC1_Init 0 */
 
+  ADC_MultiModeTypeDef multimode = {0};
   ADC_ChannelConfTypeDef sConfig = {0};
 
-  /* USER CODE BEGIN ADC3_Init 1 */
+  /* USER CODE BEGIN ADC1_Init 1 */
 
-  /* USER CODE END ADC3_Init 1 */
+  /* USER CODE END ADC1_Init 1 */
 
   /** Common config
   */
-  hadc3.Instance = ADC3;
-  hadc3.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
-  hadc3.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc3.Init.DataAlign = ADC3_DATAALIGN_RIGHT;
-  hadc3.Init.ScanConvMode = ADC_SCAN_DISABLE;
-  hadc3.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-  hadc3.Init.LowPowerAutoWait = DISABLE;
-  hadc3.Init.ContinuousConvMode = DISABLE;
-  hadc3.Init.NbrOfConversion = 1;
-  hadc3.Init.DiscontinuousConvMode = DISABLE;
-  hadc3.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc3.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc3.Init.DMAContinuousRequests = DISABLE;
-  hadc3.Init.SamplingMode = ADC_SAMPLING_MODE_NORMAL;
-  hadc3.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
-  hadc3.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc3.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
-  hadc3.Init.OversamplingMode = DISABLE;
-  hadc3.Init.Oversampling.Ratio = ADC3_OVERSAMPLING_RATIO_2;
-  if (HAL_ADC_Init(&hadc3) != HAL_OK)
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution = ADC_RESOLUTION_16B;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+  hadc1.Init.OversamplingMode = DISABLE;
+  hadc1.Init.Oversampling.Ratio = 1;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
   {
     Error_Handler();
   }
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Channel = ADC_CHANNEL_2;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC3_SAMPLETIME_92CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
-  sConfig.OffsetSign = ADC3_OFFSET_SIGN_NEGATIVE;
-  if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
+  sConfig.OffsetSignedSaturation = DISABLE;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN ADC3_Init 2 */
+  /* USER CODE BEGIN ADC1_Init 2 */
 
-  /* USER CODE END ADC3_Init 2 */
+  /* USER CODE END ADC1_Init 2 */
 
 }
 
@@ -676,6 +714,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -735,13 +774,60 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 		 }
 	 }
 
-	 lastMessage = HAL_GetTick();
-	 CANRxMessage CANmsg;
+//	 lastMessage = HAL_GetTick();
+	 
+   uint32_t now = HAL_GetTick();
+
+   CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
 	 CANmsg.idType = RxHeader.IdType;
 	 CANmsg.dataLength = RxHeader.DataLength;
 	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here since array assignment can't be done, plus it would become a pointer
 //	 queueBufferMessage = CANmsg;
+
+   switch (CANmsg.id){
+    case 0x080:
+      lastTemMessage = now;
+      temSeen = 1;
+      break;
+
+    case 0x7E3:
+      lastAmsMessage = now;
+      amsSeen = 1;
+
+      if (CANmsg.data[0] == 0xFF){
+        isCharging = 1;
+        
+        if (DISPLAY_CAN_ERRORS){
+          if (CANmsg.data[1] != 0x00){
+            printf("AMS CAN Charging Message is Corrupt.\r\n");
+            fflush(stdout);
+          }
+        }
+      } else if (CANmsg.data[0] == 0x00){
+        isCharging = 0;
+
+        if (DISPLAY_CAN_ERRORS){
+          if (CANmsg.data[1] != 0xFF){
+            printf("AMS CAN Charging Message is Corrupt.\r\n");
+            fflush(stdout);
+          }
+        }
+      }
+
+      break;
+
+    case 0x41A:
+      lastMcMessage = now;
+      mcSeen = 1;
+      break;
+
+    case 0x18FF50E5:
+      lastChargerMessage = now;
+      chargerSeen = 1;
+      break;
+   }
+
 	 osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(processCANHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
@@ -782,52 +868,55 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 // CAN Transmit Function
 HAL_StatusTypeDef CAN_Send(uint32_t id, uint8_t *data, uint32_t length)
 {
-//    CAN_TxHeaderTypeDef TxHeader;
+    // local to the function; see global declaration comments
+    FDCAN_TxHeaderTypeDef txHeader = {0};
+//    CAN_TxHeaderTypeDef txHeader;
 //    uint32_t TxMailbox;
-	  TxHeader.Identifier = id;
-	  TxHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
-	  TxHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
+	  txHeader.Identifier = id;
+	  txHeader.TxFrameType  = FDCAN_DATA_FRAME; // Remote Transmission Request (RTR) tells CAN controller we are sending data
+	  txHeader.IdType  = FDCAN_STANDARD_ID; // Identifies if we are using extended(29-bit) or standard (11-bit) CAN; It is currently set to standard
 
 	  switch (length)
 	  {
-	      case 0: TxHeader.DataLength = FDCAN_DLC_BYTES_0; break; // Data Length Code (DLC) -- The number of bytes in the data frame
-	      case 1: TxHeader.DataLength = FDCAN_DLC_BYTES_1; break;
-	      case 2: TxHeader.DataLength = FDCAN_DLC_BYTES_2; break;
-	      case 3: TxHeader.DataLength = FDCAN_DLC_BYTES_3; break;
-	      case 4: TxHeader.DataLength = FDCAN_DLC_BYTES_4; break;
-	      case 5: TxHeader.DataLength = FDCAN_DLC_BYTES_5; break;
-	      case 6: TxHeader.DataLength = FDCAN_DLC_BYTES_6; break;
-	      case 7: TxHeader.DataLength = FDCAN_DLC_BYTES_7; break;
-	      case 8: TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
+	      case 0: txHeader.DataLength = FDCAN_DLC_BYTES_0; break; // Data Length Code (DLC) -- The number of bytes in the data frame
+	      case 1: txHeader.DataLength = FDCAN_DLC_BYTES_1; break;
+	      case 2: txHeader.DataLength = FDCAN_DLC_BYTES_2; break;
+	      case 3: txHeader.DataLength = FDCAN_DLC_BYTES_3; break;
+	      case 4: txHeader.DataLength = FDCAN_DLC_BYTES_4; break;
+	      case 5: txHeader.DataLength = FDCAN_DLC_BYTES_5; break;
+	      case 6: txHeader.DataLength = FDCAN_DLC_BYTES_6; break;
+	      case 7: txHeader.DataLength = FDCAN_DLC_BYTES_7; break;
+	      case 8: txHeader.DataLength = FDCAN_DLC_BYTES_8; break;
 
 	      default:
 	          // Invalid CAN payload length
-	    	  TxHeader.DataLength = FDCAN_DLC_BYTES_8; break;
+	    	  txHeader.DataLength = FDCAN_DLC_BYTES_8; break;
 	          break;
 	  }
 
-	  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
-	  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
-	  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-	  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
-	  TxHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
+	  txHeader.FDFormat = FDCAN_CLASSIC_CAN;   // Configures behavior as standard CAN
+	  txHeader.BitRateSwitch = FDCAN_BRS_OFF;  // No fast data baud-rate switching (this is for standard CAN)
+	  txHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+	  txHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS; // Disables internal timestamp when sending data
+	  txHeader.MessageMarker = 0; // Doesn't matter since FIFOControl is off
 
 
 	  txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
-	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	while ((status2 = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, data)) != HAL_OK) // Wait till a Tx mailbox is free.
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 	  		osDelay(50); // Give back control to scheduler for 1ms
 
 	  	}
-//    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
-	  	return 0;
+//    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, data);
+//           --> status2
+	  	return status2;
 }
 
 // Function to check if a certain message was received over the last half second
 uint8_t lastMessageSent(uint32_t lastMessage){
-	if ((HAL_GetTick() - lastMessage) >= 3000) {
+	if ((HAL_GetTick() - lastMessage) >= 500) { // 500ms = 0.5s
 		return 1;
 	}
 	return 0;
@@ -842,32 +931,47 @@ uint8_t lastMessageSent(uint32_t lastMessage){
   * @retval None
   */
 /* USER CODE END Header_ControlPedal */
+
+#define TEST_MODE // comment out when test circuit implemented
+
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  FDCAN_TxHeaderTypeDef pedalTxHeader = {0};
+
+  pedalTxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  pedalTxHeader.IdType = FDCAN_STANDARD_ID;
+  pedalTxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  pedalTxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  pedalTxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  pedalTxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  pedalTxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  pedalTxHeader.MessageMarker = 0;
 
   /* Infinite loop */
   for(;;)
   {
+
+#ifdef TEST_MODE
+      inputPedalVoltage = testPedalVoltage;
+#else
 	  //	UBaseType_t highWaterMark;
-//	  	HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
-	  	HAL_ADC_Start(&hadc3); // Starts ADC1 on STM32
+
+	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
 	  //	HAL_ADC_PollForConversion(&hadc1, 20); // ADC data collected via polling with timeout of 20 units
-	  	  if ((adcStatus = HAL_ADC_PollForConversion(&hadc3, 20) == HAL_OK))
+	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  	  {
-	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc3)) * (3.3 / 4095);
+	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
 
 	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
 	  	  }
-
-//	  	inputPedalVoltage = 2.5; // This is just here so that I can test without a circuit; remove later
-
+#endif
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
 	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
 	  	{
 	  		//TxData[0]++; // Increment the first byte
 
-	  		TxHeader.Identifier = CMD_SetRelativeCurrent; // ID the STM is transmitting with
+	  		pedalTxHeader.Identifier = CMD_SetRelativeCurrent; // ID the STM is transmitting with
 
 	  		CalculatedValue = ((inputPedalVoltage - CenterPedalVoltage[0]) / (MaxPedalVoltage[0] - CenterPedalVoltage[0])) * 1000;
 
@@ -883,7 +987,7 @@ void ControlPedal(void *argument)
 	  	}
 	  	else if (inputPedalVoltage < CenterPedalVoltage[0] && inputPedalVoltage >= MinPedalVoltage[0]) // Checks if the car is braking and is not faulted
 	  	{
-	  		TxHeader.Identifier = CMD_SetRelativeBrakeCurrent; // ID the STM is transmitting with
+	  		pedalTxHeader.Identifier = CMD_SetRelativeBrakeCurrent; // ID the STM is transmitting with
 
 	  		CalculatedValue = ((inputPedalVoltage - MinPedalVoltage[0]) / (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000;
 
@@ -892,17 +996,17 @@ void ControlPedal(void *argument)
 	  	}
 	  	else
 	  	{
-	  		TxHeader.Identifier = 0x111;
+	  		pedalTxHeader.Identifier = 0x111;
 
 	  		TxData[0] = 0xFF;   // 0x00
-	  		TxData[1] = 0x66;
+	  		TxData[1] = 0xFF;
 	  	}
 
-//  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
-//  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
+  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
+  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
 
 
-	  	while ((HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, TxData) != HAL_OK)) // Wait till a Tx mailbox is free.
+	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &pedalTxHeader, TxData)) != HAL_OK) // Wait till a Tx mailbox is free.
 	  	{
 //	  		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
 //	  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
@@ -934,11 +1038,63 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
+    temError = lastMessageSent(lastTemMessage);
+    amsError = lastMessageSent(lastAmsMessage);
+    mcError = lastMessageSent(lastMcMessage);
+
+    if (isCharging){
+      chargerError = lastMessageSent(lastChargerMessage);
+    } else {
+      chargerError = 0;
+    }
+
+    if (temError || amsError || mcError || chargerError){
+      BSP_LED_On(LED_RED);
+      BSP_LED_Off(LED_GREEN);
+
+      // Displays to the console any errors
+	    if(DISPLAY_CAN_ERRORS){
+//			  if(heartBeatError)
+//			  {
+//				  printf("Heartbeat message not received within 500ms.\r\n");
+//				  fflush(stdout);
+//			  }
+        if(temError)
+        {
+          printf("TEM message not received within 500ms.\r\n");
+          fflush(stdout);
+        }
+        if(amsError)
+        {
+          printf("AMS message not received within 500ms.\r\n");
+          fflush(stdout);
+        }
+        if(mcError)
+        {
+          printf("MC message not received within 500ms.\r\n");
+          fflush(stdout);
+        }
+        if(chargerError)
+        {
+          printf("Charger message not received within 500ms.\r\n");
+          fflush(stdout);
+        }
+	    }
+    } else {
+      BSP_LED_Off(LED_RED);
+      BSP_LED_On(LED_GREEN);
+    }
+
+    osDelay(100);
+// the following watchdog relies on receiving messages from osMessageQueueGet()
+// if nothing arrives (i.e., all ECUs are dead) it will stop functioning
+/*
 	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
 	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
 	 CANRxMessage CANmsg;
 	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
+
 
 	 queueBufferRecieved = CANmsg;
 	 // Throw a lil delay to let the CAN message go thru
@@ -1020,51 +1176,52 @@ void StartCANWatchdog(void *argument)
 	 // If any of the error flags are high, Shut the relay down
 	 if(temError + amsError + mcError + chargerError)
 	 {
-//		 BSP_LED_On(LED_RED); // This turns the LED on
-//		 BSP_LED_Off(LED_GREEN);
-		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
-		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+		 BSP_LED_On(LED_RED); // This turns the LED on
+		 BSP_LED_Off(LED_GREEN);
+//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED on
+//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
 
 		 // Displays to the console any errors
 		 if(DISPLAY_CAN_ERRORS)
 		 {
 //			 if(heartBeatError)
 //			 {
-//				 printf("Heartbeat message not received within a second.\r\n");
+//				 printf("Heartbeat message not received within 500ms.\r\n");
 //				 fflush(stdout);
 //			 }
 			 if(temError)
 			 {
-				 printf("TEM message not received within a second.\r\n");
+				 printf("TEM message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(amsError)
 			 {
-				 printf("AMS message not received within a second.\r\n");
+				 printf("AMS message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(mcError)
 			 {
-				 printf("MC message not received within a second.\r\n");
+				 printf("MC message not received within 500ms.\r\n");
 				 fflush(stdout);
 			 }
 			 if(chargerError)
 			 {
-				 printf("Charger message not received within a second.\r\n");
+				 printf("Charger message not received within 500ms.\r\n");
 				 fflush(stdout);
 		 	 }
 	 	 }
 	 }
 	 else
 	 {
-		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
+//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
 
-//		 BSP_LED_Off(LED_RED);
-//		 BSP_LED_On(LED_GREEN);
+		 BSP_LED_Off(LED_RED);
+		 BSP_LED_On(LED_GREEN);
    	 }
 
 //    osDelay(20);
+*/
   }
   /* USER CODE END StartCANWatchdog */
 }
@@ -1082,7 +1239,7 @@ void StartAPPSCalibration(void *argument)
 //	float recordedVoltages[10]; // Buffer of all the pedal input voltages read so far
 //	uint8_t voltageIndex = 0; // Index on the recordedVoltages variable
 //	BSP_LED_On(LED_RED);
-//	printf("APPS Calibration Started \r\n");
+	printf("APPS Calibration Started \r\n");
 	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
 //	printf("APPS Calibration Started");
 
@@ -1091,31 +1248,30 @@ void StartAPPSCalibration(void *argument)
   {
 	// Task should be suspended if the motor is spinning
 //	  BSP_LED_Toggle(LED_YELLOW);
-//	  HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
-//
-//	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
-//	  {
-//		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
-////		  BSP_LED_Toggle(LED_YELLOW);
-//
-//	  }
-//	  else
-//	  {
-//		  BSP_LED_Toggle(LED_RED);
-//	  }
-//
-//	  if (inputPedalVoltage > MaxPedalVoltage[0])
-//	  {
-//		  MaxPedalVoltage[0] = inputPedalVoltage;
-//	  }
-//	  else if (inputPedalVoltage < MinPedalVoltage[0])
-//	  {
-//		MinPedalVoltage[0] = inputPedalVoltage;
-//	  }
-//	  CenterPedalVoltage = MinPedalVoltage + ((MaxPedalVoltage - MinPedalVoltage) / 2);
-////	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
-////	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
-//	  printf("Reading Pedal Voltage... \r\n");
+	  HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
+
+	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
+	  {
+		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
+//		  BSP_LED_Toggle(LED_YELLOW);
+
+	  }
+	  else
+	  {
+		  BSP_LED_Toggle(LED_RED);
+	  }
+
+	  if (inputPedalVoltage > MaxPedalVoltage[0])
+	  {
+		  MaxPedalVoltage[0] = inputPedalVoltage;
+	  }
+	  else if (inputPedalVoltage < MinPedalVoltage[0])
+	  {
+		MinPedalVoltage[0] = inputPedalVoltage;
+	  }
+	  // printf("Max Pedal Voltage: %.3f ", MaxPedalVoltage[0]);
+	  // printf("Min Pedal Voltage: %.3f ", MinPedalVoltage[0]);
+	  printf("Reading Pedal Voltage... \r\n");
 
 
 
@@ -1231,7 +1387,7 @@ void StartCommands(void *argument)
 		}
 		case 'c': // Begin pedal calibration
 		{
-			if (MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
+			if (currentState == MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
 			{
 				break;
 			}
@@ -1242,8 +1398,11 @@ void StartCommands(void *argument)
 
 //			osDelay(50);
 
-			MaxPedalVoltage[0] = 0;
-			MinPedalVoltage[0] = 0;
+      // start at the opposite end and calibrate towards the desired end 
+      // 0.0 --up--> max 
+      // 3.3 -down-> min
+			MaxPedalVoltage[0] = 0.0f;
+			MinPedalVoltage[0] = 3.3f;
 
 			printf("Click enter to complete calibration \r\n");
 			osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
