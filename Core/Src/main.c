@@ -1112,6 +1112,7 @@ void StartAPPSCalibration(void *argument)
 //	  {
 //		MinPedalVoltage[0] = inputPedalVoltage;
 //	  }
+//	  CenterPedalVoltage = MinPedalVoltage + ((MaxPedalVoltage - MinPedalVoltage) / 2);
 ////	  printf("Max Pedal Voltage: %.3f", MaxPedalVoltage[0]);
 ////	  printf("Min Pedal Voltage: %.3f", MinPedalVoltage[0]);
 //	  printf("Reading Pedal Voltage... \r\n");
