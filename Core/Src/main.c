@@ -23,11 +23,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stm32h7xx_hal.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -45,6 +46,7 @@
 // Pedal Calibration Inversion Constants
 #define  InvertAnalogOnePedal 0 // Swap the max and min pedal voltages on analog line one
 #define  InvertAnalogTwoPedal 0 // Swap the max and min pedal voltages on analog line two
+#define TEST_MODE
 
 /* USER CODE END PD */
 
@@ -109,6 +111,13 @@ const osThreadAttr_t readCANRX_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
+/* Definitions for pedalErrorCheck */
+osThreadId_t pedalErrorCheckHandle;
+const osThreadAttr_t pedalErrorCheck_attributes = {
+  .name = "pedalErrorCheck",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
 /* Definitions for CANRxQueue */
 osMessageQueueId_t CANRxQueueHandle;
 const osMessageQueueAttr_t CANRxQueue_attributes = {
@@ -139,7 +148,7 @@ HAL_StatusTypeDef status;
 HAL_StatusTypeDef status2;
 HAL_StatusTypeDef status3;
 uint32_t txFreeLevel; // Space in TX FIFO left
-uint32_t fdcanError;
+HAL_FDCAN_StateTypeDef fdcanError;
 
 
 // global var used by many rtos tasks
@@ -148,7 +157,7 @@ FDCAN_TxHeaderTypeDef TxHeader; // Header containing the information of the tran
 FDCAN_RxHeaderTypeDef RxHeader; // Header containing the information of the received frame
 
 uint8_t TxData[8] = {0}; // Buffer of the data to send (8 bytes data)
-uint8_t WatchDogTxData[8] = {9}; // Random Buffer data to simulate messages for Watchdog
+uint8_t WatchDogTxData[8] = {1, 0, 0, 0, 0, 0, 0, 0}; // Random Buffer data to simulate messages for Watchdog
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
@@ -159,40 +168,45 @@ uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 //////////////////////////////////// Motor Controller ////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-const uint8_t MC_NodeId = 0x3a; // Node ID of the MC = 58
+const uint8_t mcNodeId = 0x1a; // Node ID of the MC = 26
 
 // MC commands
-const uint16_t CMD_SetRelativeCurrent = ((0x05 << 5) + MC_NodeId); // Set relative AC current message ID
-const uint16_t CMD_SetRelativeBrakeCurrent = ((0x06 << 5) + MC_NodeId);  // Set relative AC brake current message ID
-const uint16_t CMD_SetMaxAcCurrent = ((0x06 << 5) + MC_NodeId); // Set max AC current limit message ID
-const uint16_t CMD_SetMaxBrakeCurrent = ((0x09 << 5) + MC_NodeId); // Set max AC brake current limit message ID
-const uint16_t CMD_SetMaxDcCurrent = ((0x0A << 5) + MC_NodeId); // Set max DC current limit message ID
-const uint16_t CMD_SetMaxDcBrakeCurrent = ((0x0B << 5) + MC_NodeId); // Set max DC brake current limit message ID
+const uint16_t cmdSetRelativeCurrent = ((0x05 << 5) + mcNodeId); // Set relative AC current message ID
+const uint16_t cmdSetRelativeBrakeCurrent = ((0x06 << 5) + mcNodeId);  // Set relative AC brake current message ID
+const uint16_t cmdSetMaxAcCurrent = ((0x06 << 5) + mcNodeId); // Set max AC current limit message ID
+const uint16_t cmdSetMaxBrakeCurrent = ((0x09 << 5) + mcNodeId); // Set max AC brake current limit message ID
+const uint16_t cmdSetMaxDcCurrent = ((0x0A << 5) + mcNodeId); // Set max DC current limit message ID
+const uint16_t cmdSetMaxDcBrakeCurrent = ((0x0B << 5) + mcNodeId); // Set max DC brake current limit message ID
+const uint16_t cmdDriveEnable = ((0x0C << 5) + mcNodeId); // Set max DC brake current limit message ID
 
 
 // Data from MC
-const uint16_t RCV_MC_GeneralData = ((0x1F << 5) + MC_NodeId); // Using | instead of + wouldn't work here bc there would be overlap between the node ID and the packet ID
+const uint16_t RCV_MC_GeneralDataOne = ((0x20 << 5) + mcNodeId); // Using | instead of + wouldn't work here bc there would be overlap between the node ID and the packet ID
 
-// AMS Limits
+// AMS Limits - This is only here temporarily, the limits will be controlled by the AMS
 uint16_t DischargeCurrentLimit = 30; // AMS discharge current limit
 uint16_t ChargeCurrentLimit = 20; // AMS charge current limit
 
 // Pedal Calibration Constants
-float MaxPedalVoltage[2] = {3.3, 3.3}; // Max voltages on both analog lines for the pedal input
-float MinPedalVoltage[2] = {0.5, 0.5}; // Min voltages on both analog lines for the pedal input
-float CenterPedalVoltage[2] = {2.0, 2.0}; // Center voltages on both analog lines for the pedal input. This voltage corresponds position in which braking/throttle is swapped
+float maxPedalVoltage[2] = {3.3, 3.3}; // Max voltages on both analog lines for the pedal input
+float minPedalVoltage[2] = {0.5, 0.5}; // Min voltages on both analog lines for the pedal input
+float centerPedalVoltage[2] = {2.0, 2.0}; // Center voltages on both analog lines for the pedal input. This voltage corresponds position in which braking/throttle is swapped
+float PedalDeadbandPercentage = 0.15; // Percent deadband of pedal
 
+// Pedal Error Checking
+float maxPedalVoltageDifferencePercentage = 10; //
 
-float PedalDeadband = 0.15; // Percent deadband of pedal
 
 
 uint32_t lastThrottleOrBrake = 0; // Gets the time at which a throttle or break CAN message is sent
 
-float testPedalVoltage = 2.5; // temporary test before circuit test implemented
-float inputPedalVoltage = 0; // voltage that the APPS is outputting to the STM
+float testPedalVoltage[2] = {2.7, 1.5}; // temporary test before circuit test implemented
+float inputPedalVoltage[2] = {0.0, 0.0}; // voltage that the APPS is outputting to the STM
+float inputPedalVoltagePercentages[2] = {0.0, 0.0}; // APPS output voltages as a percentage
+
 char msg[20];
 char CANBuffer[100]; // Buffer used to display CAN messages on terminal
-uint16_t CalculatedValue; // The value to be sent over to the MC over CAN
+uint16_t CalculatedValue = 0; // The value to be sent over to the MC over CAN
 
 
 
@@ -252,8 +266,8 @@ uint8_t packet;
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_FDCAN1_Init(void);
+static void MX_ADC1_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
@@ -261,6 +275,7 @@ void StartTestCANSend(void *argument);
 void StartDataDisplay(void *argument);
 void StartCommands(void *argument);
 void StartReadingCANRX(void *argument);
+void StartPedalErrorCheck(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -292,8 +307,10 @@ CANRxMessage queueBufferRecieved; // Data being read from the queue
 typedef enum
 {
 	PEDAL_CALIBRATION, // Assigned 0
-	MOTOR_SPINNING, // Assigned 1
-	WATCHDOG_FAULTED // Assigned 2
+	MOTOR_SPINNING,    // Assigned 1
+	WATCHDOG_FAULTED,  // Assigned 2
+	FAULT, 			   // Assigned 3
+	READY,			   // Assigned 4
 } State;
 
 volatile State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
@@ -356,8 +373,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ADC1_Init();
   MX_FDCAN1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
@@ -416,6 +433,9 @@ int main(void)
 
   /* creation of readCANRX */
   readCANRXHandle = osThreadNew(StartReadingCANRX, NULL, &readCANRX_attributes);
+
+  /* creation of pedalErrorCheck */
+  pedalErrorCheckHandle = osThreadNew(StartPedalErrorCheck, NULL, &pedalErrorCheck_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -655,22 +675,6 @@ static void MX_FDCAN1_Init(void)
     	  Error_Handler();
       }
 
-  // Filter Two
-  // Allows only MC messages to pass
-
-//	  filter.IdType = FDCAN_STANDARD_ID;          // Apply this filter to 11-bit Standard IDs
-//	  filter.FilterIndex = 1;                     // Second slot in the filter list (0 to 27)
-//	  filter.FilterType = FDCAN_FILTER_MASK;      // Classic ID + Mask mode (replaces CAN_FILTERMODE_IDMASK)
-//	  filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO1; // Route matching packets directly to FIFO1
-//	  filter.FilterID1 = MC_NodeId;                  // Only allows MC node IDs to pass
-//	  filter.FilterID2 = 0x0FF;                  // Matches the lower 8 bits to find the MC_NodeId
-
-
-//	  if (HAL_FDCAN_ConfigFilter(&hfdcan1, &filter) != HAL_OK) // checks to see if filter is configured correctly
-//      {
-//    	  // Filter configuration error
-//    	  Error_Handler();
-//      }
 
       // Starts CAN peripheral if filter config is good
       if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) // Tries to start CAN and checks for error
@@ -685,15 +689,8 @@ static void MX_FDCAN1_Init(void)
     	  Error_Handler();
       }
 
-
-      // Activate CAN RX notifications on FIFO1
-//      if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO1_NEW_MESSAGE, 0) != HAL_OK) // 0 means it only focuses on Rx interrupts
-//      {
-//    	  Error_Handler();
-//      }
-
-      TxData[0] = 0;
-      TxData[7] = 0xFF;
+//      TxData[0] = 0;
+//      TxData[7] = 0xFF;
 
 
   /* USER CODE END FDCAN1_Init 2 */
@@ -716,6 +713,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -772,12 +770,13 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			 // Reception Error; error thrown if the receive fails
 			 Error_Handler();
 		 }
+
 	 }
 
 //	 lastMessage = HAL_GetTick();
 	 
    uint32_t now = HAL_GetTick();
-
+//   BSP_LED_On(LED_RED);
    CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
 	 CANmsg.idType = RxHeader.IdType;
@@ -817,7 +816,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
       break;
 
-    case 0x41A:
+    case 0x41A: // (0x20 << 5) + 0x1a
       lastMcMessage = now;
       mcSeen = 1;
       break;
@@ -833,36 +832,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
 
 }
-
-
-// Callback function for data received on FIFO1
-//void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
-//{
-//
-//	 if((RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) != RESET)
-//	 {
-//		 /* Retrieve Rx messages from RX FIFO1 */
-//		 if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO1, &RxHeader, RxData) != HAL_OK)
-//		 {
-//			 // Reception Error; error thrown if the receive fails
-//			 Error_Handler();
-//		 }
-//	 }
-//
-//	 CANRxMessage selectReadCAN;
-//	 selectReadCAN.id = RxHeader.Identifier;
-//	 selectReadCAN.idType = RxHeader.IdType;
-//	 selectReadCAN.dataLength = RxHeader.DataLength;
-//	 memcpy(selectReadCAN.data, RxData, 8); // Passes a copy of RxData to readCAN.data; '=' would not work here sine array assignment can't be done, plus it would become a pointer
-//	 queueBufferMessage = selectReadCAN;
-//
-//	 // Uses queue for all CAN messages if CANRxToggle = 0
-//	 if (toggleCANRx)
-//	 {
-//		 queueStatus = osMessageQueuePut(DisplayDataQueueHandle, &selectReadCAN, 0, 0); // Adds received CAN message to readCAN queue
-//	 }
-//
-//}
 
 
 // CAN Transmit Function
@@ -931,12 +900,11 @@ uint8_t lastMessageSent(uint32_t lastMessage){
   * @retval None
   */
 /* USER CODE END Header_ControlPedal */
-
-#define TEST_MODE // comment out when test circuit implemented
-
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
+//  osThreadSuspend(PedalControlHandle);
+
   FDCAN_TxHeaderTypeDef pedalTxHeader = {0};
 
   pedalTxHeader.TxFrameType = FDCAN_DATA_FRAME;
@@ -951,29 +919,33 @@ void ControlPedal(void *argument)
   /* Infinite loop */
   for(;;)
   {
+	  memset(TxData, 0xFF, sizeof(TxData)); // Sets all the bytes in TxData to 0xFF
+
+//	  pedalTxHeader.Identifier = CMD_DriveEnable;
+//	  TxData[0] = (1 >> 8) & 0xFF;   // 0x00
+//	  TxData[1] = 1 & 0xFF;          // 0xc8
 
 #ifdef TEST_MODE
-      inputPedalVoltage = testPedalVoltage;
+      inputPedalVoltage[0] = testPedalVoltage[0];
+      inputPedalVoltage[1] = testPedalVoltage[1];
 #else
 	  //	UBaseType_t highWaterMark;
 
-	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
-	  //	HAL_ADC_PollForConversion(&hadc1, 20); // ADC data collected via polling with timeout of 20 units
-	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
-	  	  {
-	  		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 4095);
 
-	  //		  sprintf(msg, "Voltage: %hu\r\n", inputPedalVoltage);
+	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
+	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK) // ADC data collected via polling with timeout of 20 units
+	  	  {
+	  		  inputPedalVoltage[0] = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
+
 	  	  }
 #endif
 	  	// Will need to think about what to do when pedal voltage is exactly the center voltage. However, this is where deadband may come in
-	  	if (inputPedalVoltage > CenterPedalVoltage[0] && inputPedalVoltage <= MaxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
+	  	if (inputPedalVoltage[0] > centerPedalVoltage[0] && inputPedalVoltage[0] <= maxPedalVoltage[0]) // Checks if the car is trying to accelerate and is not faulted
 	  	{
-	  		//TxData[0]++; // Increment the first byte
 
-	  		pedalTxHeader.Identifier = CMD_SetRelativeCurrent; // ID the STM is transmitting with
+	  		pedalTxHeader.Identifier = cmdSetRelativeCurrent; // ID the STM is transmitting with
 
-	  		CalculatedValue = ((inputPedalVoltage - CenterPedalVoltage[0]) / (MaxPedalVoltage[0] - CenterPedalVoltage[0])) * 1000;
+	  		CalculatedValue = ((inputPedalVoltage[0] - centerPedalVoltage[0]) / (maxPedalVoltage[0] - centerPedalVoltage[0])) * 1000;
 
 
 	  		// Splits 16 bit calculated value into two separate bytes. This is because the MC expects a 2 byte long data frame
@@ -984,26 +956,28 @@ void ControlPedal(void *argument)
 	  		TxData[1] = CalculatedValue & 0xFF;          // 0xc8
 
 
-	  	}
-	  	else if (inputPedalVoltage < CenterPedalVoltage[0] && inputPedalVoltage >= MinPedalVoltage[0]) // Checks if the car is braking and is not faulted
-	  	{
-	  		pedalTxHeader.Identifier = CMD_SetRelativeBrakeCurrent; // ID the STM is transmitting with
 
-	  		CalculatedValue = ((inputPedalVoltage - MinPedalVoltage[0]) / (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000;
+	  	}
+	  	else if (inputPedalVoltage[0] < centerPedalVoltage[0] && inputPedalVoltage[0] >= minPedalVoltage[0]) // Checks if the car is braking and is not faulted
+	  	{
+	  		pedalTxHeader.Identifier = cmdSetRelativeBrakeCurrent; // ID the STM is transmitting with
+
+	  		CalculatedValue = ((inputPedalVoltage[0] - minPedalVoltage[0]) / (centerPedalVoltage[0] - minPedalVoltage[0])) * 1000;
 
 	  		TxData[0] = (CalculatedValue >> 8) & 0xFF;   // 0x00; Shifts the value to the right by 1 byte, allowing only 0s to be read with masking
 	  		TxData[1] = CalculatedValue & 0xFF;          // 0xc8; Only reads the actual value
 	  	}
 	  	else
 	  	{
-	  		pedalTxHeader.Identifier = 0x111;
 
-	  		TxData[0] = 0xFF;   // 0x00
-	  		TxData[1] = 0xFF;
+	  		pedalTxHeader.Identifier = cmdDriveEnable;
+		    TxData[0] = (0 >> 8) & 0xFF;   // 0x00
+		    TxData[1] = 0 & 0xFF;
 	  	}
 
   		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
-  		fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
+  		//fdcanError = hfdcan1.ErrorCode; // Returns 32 = 0x20 -> FIFO is Full
+  		fdcanError = HAL_FDCAN_GetError(&hfdcan1);
 
 
 	  	while ((status = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &pedalTxHeader, TxData)) != HAL_OK) // Wait till a Tx mailbox is free.
@@ -1016,9 +990,9 @@ void ControlPedal(void *argument)
 
 	  	}
 
-	  //	highWaterMark = uxTaskGetStackHighWaterMark(NULL);
-	  //
-	  //	printf("Unused stack: %lu words\r\n", (uint32_t)highWaterMark); // Prints how much space a task is not using
+//	  //	highWaterMark = uxTaskGetStackHighWaterMark(NULL);
+//	  //
+//	  //	printf("Unused stack: %lu words\r\n", (uint32_t)highWaterMark); // Prints how much space a task is not using
 
 	    osDelay(20); // Without delay the Tx Mailbox reaches an error, most likely it fills up to quick. Needs to be checked to confirm
   }
@@ -1052,6 +1026,10 @@ void StartCANWatchdog(void *argument)
       BSP_LED_On(LED_RED);
       BSP_LED_Off(LED_GREEN);
 
+//      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
+//      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+
+
       // Displays to the console any errors
 	    if(DISPLAY_CAN_ERRORS){
 //			  if(heartBeatError)
@@ -1083,9 +1061,12 @@ void StartCANWatchdog(void *argument)
     } else {
       BSP_LED_Off(LED_RED);
       BSP_LED_On(LED_GREEN);
+
+//	 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+//	 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
     }
 
-    osDelay(100);
+    osDelay(20);
 // the following watchdog relies on receiving messages from osMessageQueueGet()
 // if nothing arrives (i.e., all ECUs are dead) it will stop functioning
 /*
@@ -1236,9 +1217,6 @@ void StartCANWatchdog(void *argument)
 void StartAPPSCalibration(void *argument)
 {
   /* USER CODE BEGIN StartAPPSCalibration */
-//	float recordedVoltages[10]; // Buffer of all the pedal input voltages read so far
-//	uint8_t voltageIndex = 0; // Index on the recordedVoltages variable
-//	BSP_LED_On(LED_RED);
 	printf("APPS Calibration Started \r\n");
 	osThreadSuspend(APPSCalibrationHandle); // Suspends APPS calibration task
 //	printf("APPS Calibration Started");
@@ -1252,30 +1230,33 @@ void StartAPPSCalibration(void *argument)
 
 	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK)
 	  {
-		  inputPedalVoltage = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
+		  inputPedalVoltage[0] = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
 //		  BSP_LED_Toggle(LED_YELLOW);
 
 	  }
 	  else
 	  {
-		  BSP_LED_Toggle(LED_RED);
+//		  BSP_LED_Toggle(LED_RED);
 	  }
 
-	  if (inputPedalVoltage > MaxPedalVoltage[0])
+	  if (inputPedalVoltage[0] > maxPedalVoltage[0])
 	  {
-		  MaxPedalVoltage[0] = inputPedalVoltage;
+		  maxPedalVoltage[0] = inputPedalVoltage[0];
 	  }
-	  else if (inputPedalVoltage < MinPedalVoltage[0])
+	  else if (inputPedalVoltage[0] < minPedalVoltage[0])
 	  {
-		MinPedalVoltage[0] = inputPedalVoltage;
+		minPedalVoltage[0] = inputPedalVoltage[0];;
 	  }
-	  // printf("Max Pedal Voltage: %.3f ", MaxPedalVoltage[0]);
-	  // printf("Min Pedal Voltage: %.3f ", MinPedalVoltage[0]);
+
+	  // centerPedalVoltage = minPedalVoltage + ((maxPedalVoltage - minPedalVoltage) / 2);
+
+	  // printf("Max Pedal Voltage: %.3f ", maxPedalVoltage[0]);
+	  // printf("Min Pedal Voltage: %.3f ", minPedalVoltage[0]);
 	  printf("Reading Pedal Voltage... \r\n");
 
 
 
-    osDelay(300);
+    osDelay(200);
   }
   /* USER CODE END StartAPPSCalibration */
 }
@@ -1300,12 +1281,10 @@ void StartTestCANSend(void *argument)
 
 	  // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-//	 osDelay(50);
 	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-//	 osDelay(50);
-//	 CAN_Send(0x41A, WatchDogTxData, 8); // MC message
-
-	 CAN_Send(RCV_MC_GeneralData, WatchDogTxData, 8); // General MC data
+//	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
+//
+	 CAN_Send(RCV_MC_GeneralDataOne, WatchDogTxData, 8); // General MC data
 
 	 osDelay(50);
   }
@@ -1326,11 +1305,12 @@ void StartDataDisplay(void *argument)
   for(;;)
   {
 
-    CANRxMessage CANPrintmsg;
-    osMessageQueueGet(DisplayDataQueueHandle, &CANPrintmsg, NULL, osWaitForever); // Pull data from DisplayData queue
-
 	// Display the CAN message to the serial monitor
 	if(DISPLAY_CAN_MESSAGE){
+
+	    CANRxMessage CANPrintmsg;
+	    osMessageQueueGet(DisplayDataQueueHandle, &CANPrintmsg, NULL, osWaitForever); // Pull data from DisplayData queue
+
 
 		// Change Print syntax based on standard vs. extended
 		if (CANPrintmsg.idType == FDCAN_STANDARD_ID){
@@ -1344,7 +1324,7 @@ void StartDataDisplay(void *argument)
 			printf(" %02X", CANPrintmsg.data[i]);
 
 		printf("\r\n");
-//		osDelay(50);
+		osDelay(50);
 
 	}
 	else
@@ -1376,12 +1356,14 @@ void StartCommands(void *argument)
 		{
 //			osThreadSuspend(DataDisplayHandle);
 			DISPLAY_CAN_MESSAGE = 0;
+//			DISPLAY_CAN_ERRORS = 0;
 			break;
 		}
 		case 'd':
 		{
 //			osThreadResume(DataDisplayHandle);
 			DISPLAY_CAN_MESSAGE = 1;
+//			DISPLAY_CAN_ERRORS = 1;
 			osThreadResume(DataDisplayHandle);
 			break;
 		}
@@ -1401,8 +1383,8 @@ void StartCommands(void *argument)
       // start at the opposite end and calibrate towards the desired end 
       // 0.0 --up--> max 
       // 3.3 -down-> min
-			MaxPedalVoltage[0] = 0.0f;
-			MinPedalVoltage[0] = 3.3f;
+			maxPedalVoltage[0] = 0.0f;
+			minPedalVoltage[0] = 3.3f;
 
 			printf("Click enter to complete calibration \r\n");
 			osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
@@ -1429,7 +1411,7 @@ void StartCommands(void *argument)
 	}
 	serialByte = 0;
 
-   osDelay(200);
+   osDelay(50);
   }
   /* USER CODE END StartCommands */
 }
@@ -1450,7 +1432,7 @@ void StartReadingCANRX(void *argument)
 //	CANRxMessage readCAN;
 //	osMessageQueueGet(processCANHandle, &readCAN, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
 //
-//	if((readCAN.id & 0xFF) == MC_NodeId) // Checks if an MC message was received
+//	if((readCAN.id & 0xFF) == mcNodeId) // Checks if an MC message was received
 //	{
 //		// Relevant MC messages
 //		switch(readCAN.id >> 5) // Need to get this to be the
@@ -1465,9 +1447,40 @@ void StartReadingCANRX(void *argument)
 //		}
 //	}
 
-    osDelay(1);
+    osDelay(1000);
   }
   /* USER CODE END StartReadingCANRX */
+}
+
+/* USER CODE BEGIN Header_StartPedalErrorCheck */
+/**
+* @brief Function implementing the pedalErrorCheck thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartPedalErrorCheck */
+void StartPedalErrorCheck(void *argument)
+{
+  /* USER CODE BEGIN StartPedalErrorCheck */
+  /* Infinite loop */
+  for(;;)
+  {
+	  inputPedalVoltagePercentages[0] = (inputPedalVoltage[0])/(maxPedalVoltage[0]-minPedalVoltage[0]); // APPS output 1 voltage percentage
+	  inputPedalVoltagePercentages[1] = (inputPedalVoltage[1])/(maxPedalVoltage[1]-minPedalVoltage[1]); // APPS output 2 voltage percentage
+
+	  // Checks if the difference between both pedal outputs is greater than the max allowed percent difference
+	if (fabsf(inputPedalVoltagePercentages[0] - inputPedalVoltagePercentages[1]) > (maxPedalVoltageDifferencePercentage/100)) // Use fabsf() for floats
+	{
+		currentState = FAULT;
+//		BSP_LED_Toggle(LED_YELLOW);
+	}
+	else
+	{
+		currentState = READY;
+	}
+    osDelay(50);
+  }
+  /* USER CODE END StartPedalErrorCheck */
 }
 
  /* MPU Configuration */
