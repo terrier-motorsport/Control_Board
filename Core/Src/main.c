@@ -67,21 +67,21 @@ osThreadId_t PedalControlHandle;
 const osThreadAttr_t PedalControl_attributes = {
   .name = "PedalControl",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityHigh1,
 };
 /* Definitions for CANWatchdog */
 osThreadId_t CANWatchdogHandle;
 const osThreadAttr_t CANWatchdog_attributes = {
   .name = "CANWatchdog",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityHigh1,
 };
 /* Definitions for APPSCalibration */
 osThreadId_t APPSCalibrationHandle;
 const osThreadAttr_t APPSCalibration_attributes = {
   .name = "APPSCalibration",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for TestCANSend */
 osThreadId_t TestCANSendHandle;
@@ -116,7 +116,7 @@ osThreadId_t pedalErrorCheckHandle;
 const osThreadAttr_t pedalErrorCheck_attributes = {
   .name = "pedalErrorCheck",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for CANRxQueue */
 osMessageQueueId_t CANRxQueueHandle;
@@ -135,8 +135,8 @@ const osMessageQueueAttr_t processCAN_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-uint8_t DISPLAY_CAN_MESSAGE = 1;			// Turn this on/off if you want to print/ignore raw CAN Messages
-uint8_t DISPLAY_CAN_ERRORS = 1;			// Turn this on/off if you want to print/ignore CAN Errors
+uint8_t DISPLAY_CAN_MESSAGE = 0;			// Turn this on/off if you want to print/ignore raw CAN Messages
+uint8_t DISPLAY_CAN_ERRORS = 0;			// Turn this on/off if you want to print/ignore CAN Errors
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -188,9 +188,9 @@ uint16_t DischargeCurrentLimit = 30; // AMS discharge current limit
 uint16_t ChargeCurrentLimit = 20; // AMS charge current limit
 
 // Pedal Calibration Constants
-float maxPedalVoltage[2] = {3.3, 3.3}; // Max voltages on both analog lines for the pedal input
-float minPedalVoltage[2] = {0.5, 0.5}; // Min voltages on both analog lines for the pedal input
-float centerPedalVoltage[2] = {2.0, 2.0}; // Center voltages on both analog lines for the pedal input. This voltage corresponds position in which braking/throttle is swapped
+float maxPedalVoltage[2] = {3.3, 0.759}; // Max voltages on both analog lines for the pedal input
+float minPedalVoltage[2] = {0.5, 0.517}; // Min voltages on both analog lines for the pedal input
+float centerPedalVoltage[2] = {0, 0}; // Center voltages on both analog lines for the pedal input. This voltage corresponds position in which braking/throttle is swapped
 float PedalDeadbandPercentage = 0.15; // Percent deadband of pedal
 
 // Pedal Error Checking
@@ -200,7 +200,7 @@ float maxPedalVoltageDifferencePercentage = 10; //
 
 uint32_t lastThrottleOrBrake = 0; // Gets the time at which a throttle or break CAN message is sent
 
-float testPedalVoltage[2] = {2.7, 1.5}; // temporary test before circuit test implemented
+float testPedalVoltage[2] = {2.0, 1.5}; // temporary test before circuit test implemented
 float inputPedalVoltage[2] = {0.0, 0.0}; // voltage that the APPS is outputting to the STM
 float inputPedalVoltagePercentages[2] = {0.0, 0.0}; // APPS output voltages as a percentage
 
@@ -227,6 +227,7 @@ uint16_t CalculatedValue = 0; // The value to be sent over to the MC over CAN
  uint8_t chargerSeen = 0;
 
 // uint32_t lastMessage = 0;
+ uint32_t now = 0;
 
  // Initializes flags to indicate when a certain ECU hasn't sent a message in 500ms, timing out
 // uint8_t heartBeatError = 0;
@@ -237,6 +238,8 @@ uint16_t CalculatedValue = 0; // The value to be sent over to the MC over CAN
 
  // Creates int to determine if we are charging or not
  uint8_t isCharging = 0;
+
+ static const uint8_t MAX_CAN_MESSAGES = 10;
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -625,7 +628,7 @@ static void MX_FDCAN1_Init(void)
   /* USER CODE END FDCAN1_Init 1 */
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
+  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
@@ -648,7 +651,7 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
   hfdcan1.Init.TxEventsNbr = 0;
   hfdcan1.Init.TxBuffersNbr = 0;
-  hfdcan1.Init.TxFifoQueueElmtsNbr = 6;
+  hfdcan1.Init.TxFifoQueueElmtsNbr = 32;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan1.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
@@ -775,7 +778,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
 //	 lastMessage = HAL_GetTick();
 	 
-   uint32_t now = HAL_GetTick();
+   now = HAL_GetTick();
 //   BSP_LED_On(LED_RED);
    CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
@@ -784,48 +787,48 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here since array assignment can't be done, plus it would become a pointer
 //	 queueBufferMessage = CANmsg;
 
-   switch (CANmsg.id){
-    case 0x080:
-      lastTemMessage = now;
-      temSeen = 1;
-      break;
-
-    case 0x7E3:
-      lastAmsMessage = now;
-      amsSeen = 1;
-
-      if (CANmsg.data[0] == 0xFF){
-        isCharging = 1;
-        
-        if (DISPLAY_CAN_ERRORS){
-          if (CANmsg.data[1] != 0x00){
-            printf("AMS CAN Charging Message is Corrupt.\r\n");
-            fflush(stdout);
-          }
-        }
-      } else if (CANmsg.data[0] == 0x00){
-        isCharging = 0;
-
-        if (DISPLAY_CAN_ERRORS){
-          if (CANmsg.data[1] != 0xFF){
-            printf("AMS CAN Charging Message is Corrupt.\r\n");
-            fflush(stdout);
-          }
-        }
-      }
-
-      break;
-
-    case 0x41A: // (0x20 << 5) + 0x1a
-      lastMcMessage = now;
-      mcSeen = 1;
-      break;
-
-    case 0x18FF50E5:
-      lastChargerMessage = now;
-      chargerSeen = 1;
-      break;
-   }
+//   switch (CANmsg.id){
+//    case 0x080:
+//      lastTemMessage = now;
+//      temSeen = 1;
+//      break;
+//
+//    case 0x7E3:
+//      lastAmsMessage = now;
+//      amsSeen = 1;
+//
+//      if (CANmsg.data[0] == 0xFF){
+//        isCharging = 1;
+//
+//        if (DISPLAY_CAN_ERRORS){
+//          if (CANmsg.data[1] != 0x00){
+//            printf("AMS CAN Charging Message is Corrupt.\r\n");
+//            fflush(stdout);
+//          }
+//        }
+//      } else if (CANmsg.data[0] == 0x00){
+//        isCharging = 0;
+//
+//        if (DISPLAY_CAN_ERRORS){
+//          if (CANmsg.data[1] != 0xFF){
+//            printf("AMS CAN Charging Message is Corrupt.\r\n");
+//            fflush(stdout);
+//          }
+//        }
+//      }
+//
+//      break;
+//
+//    case 0x41A: // (0x20 << 5) + 0x1a
+//      lastMcMessage = now;
+//      mcSeen = 1;
+//      break;
+//
+//    case 0x18FF50E5:
+//      lastChargerMessage = now;
+//      chargerSeen = 1;
+//      break;
+//   }
 
 	 osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(processCANHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
@@ -903,7 +906,11 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
+
+	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
 //  osThreadSuspend(PedalControlHandle);
+	centerPedalVoltage[0] = ((maxPedalVoltage[0] - minPedalVoltage[0]) / 2);
+	centerPedalVoltage[1] = ((maxPedalVoltage[1] - minPedalVoltage[1]) / 2);
 
   FDCAN_TxHeaderTypeDef pedalTxHeader = {0};
 
@@ -931,11 +938,9 @@ void ControlPedal(void *argument)
 #else
 	  //	UBaseType_t highWaterMark;
 
-
-	  	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
 	  	  if (HAL_ADC_PollForConversion(&hadc1, 20) == HAL_OK) // ADC data collected via polling with timeout of 20 units
 	  	  {
-	  		  inputPedalVoltage[0] = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535);
+	  		  inputPedalVoltage[0] = (HAL_ADC_GetValue(&hadc1)) * (3.3 / 65535); // Pedal voltage in 3.3V range
 
 	  	  }
 #endif
@@ -970,9 +975,9 @@ void ControlPedal(void *argument)
 	  	else
 	  	{
 
-	  		pedalTxHeader.Identifier = cmdDriveEnable;
-		    TxData[0] = (0 >> 8) & 0xFF;   // 0x00
-		    TxData[1] = 0 & 0xFF;
+//	  		pedalTxHeader.Identifier = cmdDriveEnable;
+//		    TxData[0] = (0 >> 8) & 0xFF;   // 0x00
+//		    TxData[1] = 0 & 0xFF;
 	  	}
 
   		txFreeLevel = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1); // returns 0 -> FIFO is Full
@@ -1012,197 +1017,123 @@ void StartCANWatchdog(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    temError = lastMessageSent(lastTemMessage);
-    amsError = lastMessageSent(lastAmsMessage);
-    mcError = lastMessageSent(lastMcMessage);
 
-    if (isCharging){
-      chargerError = lastMessageSent(lastChargerMessage);
-    } else {
-      chargerError = 0;
-    }
-
-    if (temError || amsError || mcError || chargerError){
-      BSP_LED_On(LED_RED);
-      BSP_LED_Off(LED_GREEN);
-
-//      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
-//      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
-
-
-      // Displays to the console any errors
-	    if(DISPLAY_CAN_ERRORS){
-//			  if(heartBeatError)
-//			  {
-//				  printf("Heartbeat message not received within 500ms.\r\n");
-//				  fflush(stdout);
-//			  }
-        if(temError)
-        {
-          printf("TEM message not received within 500ms.\r\n");
-          fflush(stdout);
-        }
-        if(amsError)
-        {
-          printf("AMS message not received within 500ms.\r\n");
-          fflush(stdout);
-        }
-        if(mcError)
-        {
-          printf("MC message not received within 500ms.\r\n");
-          fflush(stdout);
-        }
-        if(chargerError)
-        {
-          printf("Charger message not received within 500ms.\r\n");
-          fflush(stdout);
-        }
-	    }
-    } else {
-      BSP_LED_Off(LED_RED);
-      BSP_LED_On(LED_GREEN);
-
-//	 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-//	 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
-    }
-
-    osDelay(20);
 // the following watchdog relies on receiving messages from osMessageQueueGet()
 // if nothing arrives (i.e., all ECUs are dead) it will stop functioning
-/*
+
 	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
 	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
 	 CANRxMessage CANmsg;
-	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, osWaitForever); // Gets and removes item from CANRx queue; puts task in blocked state if queue is full
+	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, 100); // Gets and removes item from CANRx queue; puts task in blocked state for 100ms if queue is full
 
 
-	 queueBufferRecieved = CANmsg;
-	 // Throw a lil delay to let the CAN message go thru
-//	 osDelay(50);
-	 packet = CANmsg.id & 0xFF;
-	    // Based on the CAN ID, determines what ECU sent the message, and update the time that
-	    // the ECU sent it's message, as well as resetting any error
-	     switch(CANmsg.id)
-	     {
-	     	// CAN Heartbeat message
-	 //        case 0x023:
-	 //            lastHeartBeatMessage = HAL_GetTick();
-	 //            heartBeatError = 0;
-	 //            break;
+	 queueBufferRecieved = CANmsg; // For testing
 
-	         // TEM Message
-	         case 0x080:
-	         	lastTemMessage = lastMessage;
-	 			temError = 0;
-	 			break;
+// Based on the CAN ID, determines what ECU sent the message, and update the time that
+// the ECU sent it's message, as well as resetting any error
+	 switch (CANmsg.id){
+		case 0x080:
+		  lastTemMessage = now;
+		  temSeen = 1;
+		  break;
 
-	 		// AMS Message
-	         case 0x7E3:
-	         	lastAmsMessage = lastMessage;
-	 			amsError = 0;
+		case 0x7E3:
+		  lastAmsMessage = now;
+		  amsSeen = 1;
 
-	 			// Check to see if charging
-	 			if(RxData[0] == 0xFF){
-	 				isCharging = 1;
-	 				if(DISPLAY_CAN_ERRORS){
-	 					if(RxData[1] != 0x00){
-	 						printf("AMS CAN Charging Message is Corrupt.\r\n");
-	 						fflush(stdout);
-	 					}
-	 				}
-	 			}
-	 			else if(RxData[0] == 0x00){
-	 				isCharging = 0;
-	 				if(DISPLAY_CAN_ERRORS){
-	 					if(RxData[1] != 0xFF){
-	 						printf("AMS CAN Charging Message is Corrupt.\r\n");
-	 						fflush(stdout);
-	 					}
-	 				}
-	 			}
-	 			break;
+		  if (CANmsg.data[0] == 0xFF){
+			isCharging = 1;
 
-	 		// MC Message
-	         case 0x41A: // 0x41A -> 0x1F MC message; Using node ID 58, 0x41A - 0x3A (58 in decimal) = 0x3E0 -> 0x3E0 >> 5 = 31 in decimal = 0x1F
-	         	lastMcMessage = lastMessage;
-	 			mcError = 0;
-	 			break;
+			if (DISPLAY_CAN_ERRORS){
+			  if (CANmsg.data[1] != 0x00){
+				printf("AMS CAN Charging Message is Corrupt.\r\n");
+				fflush(stdout);
+			  }
+			}
+		  } else if (CANmsg.data[0] == 0x00){
+			isCharging = 0;
 
-	 		// Charger Message - UPDATE
-	 		case 0x18FF50E5:
-	 			lastChargerMessage = lastMessage;
-	 			chargerError = 0;
-	 			break;
+			if (DISPLAY_CAN_ERRORS){
+			  if (CANmsg.data[1] != 0xFF){
+				printf("AMS CAN Charging Message is Corrupt.\r\n");
+				fflush(stdout);
+			  }
+			}
+		  }
 
-	     }
+		  break;
+
+		case 0x41A: // (0x20 << 5) + 0x1a
+		  lastMcMessage = now;
+		  mcSeen = 1;
+		  break;
+
+		case 0x18FF50E5:
+		  lastChargerMessage = now;
+		  chargerSeen = 1;
+		  break;
+	 }
 
 
 	 // Check if each message has been received over the past half second
-//	 heartBeatError = lastMessageSent(lastHeartBeatMessage);
-	 temError = lastMessageSent(lastTemMessage);
-	 amsError = lastMessageSent(lastAmsMessage);
-	 mcError = lastMessageSent(lastMcMessage);
+	 //heartBeatError = lastMessageSent(lastHeartBeatMessage);
 
-	 // If charging enabled, also check for charger
-	 if(isCharging)
-	 {
-		 chargerError = lastMessageSent(lastChargerMessage);
-	 }
-	 else{
-		 chargerError = 0;
-	 }
+	  temError = lastMessageSent(lastTemMessage);
+	  amsError = lastMessageSent(lastAmsMessage);
+	  mcError = lastMessageSent(lastMcMessage);
+
+	  if (isCharging){
+		chargerError = lastMessageSent(lastChargerMessage);
+	  } else {
+		chargerError = 0;
+	  }
+
+	  if (temError || amsError || mcError || chargerError){
+  //      BSP_LED_On(LED_RED);
+  //      BSP_LED_Off(LED_GREEN);
+
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
 
 
-	 // If any of the error flags are high, Shut the relay down
-	 if(temError + amsError + mcError + chargerError)
-	 {
-		 BSP_LED_On(LED_RED); // This turns the LED on
-		 BSP_LED_Off(LED_GREEN);
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED on
-//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+		// Displays to the console any errors
+		if(DISPLAY_CAN_ERRORS){
+  //			  if(heartBeatError)
+  //			  {
+  //				  printf("Heartbeat message not received within 500ms.\r\n");
+  //				  fflush(stdout);
+  //			  }
+		  if(temError)
+		  {
+			printf("TEM message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(amsError)
+		  {
+			printf("AMS message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(mcError)
+		  {
+			printf("MC message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(chargerError)
+		  {
+			printf("Charger message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		}
+	  } else {
+  //      BSP_LED_Off(LED_RED);
+  //      BSP_LED_On(LED_GREEN);
 
-		 // Displays to the console any errors
-		 if(DISPLAY_CAN_ERRORS)
-		 {
-//			 if(heartBeatError)
-//			 {
-//				 printf("Heartbeat message not received within 500ms.\r\n");
-//				 fflush(stdout);
-//			 }
-			 if(temError)
-			 {
-				 printf("TEM message not received within 500ms.\r\n");
-				 fflush(stdout);
-			 }
-			 if(amsError)
-			 {
-				 printf("AMS message not received within 500ms.\r\n");
-				 fflush(stdout);
-			 }
-			 if(mcError)
-			 {
-				 printf("MC message not received within 500ms.\r\n");
-				 fflush(stdout);
-			 }
-			 if(chargerError)
-			 {
-				 printf("Charger message not received within 500ms.\r\n");
-				 fflush(stdout);
-		 	 }
-	 	 }
-	 }
-	 else
-	 {
-//		 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-//		 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+	 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+	 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
+	  }
 
-		 BSP_LED_Off(LED_RED);
-		 BSP_LED_On(LED_GREEN);
-   	 }
-
-//    osDelay(20);
-*/
+	  osDelay(20);
   }
   /* USER CODE END StartCANWatchdog */
 }
@@ -1256,7 +1187,7 @@ void StartAPPSCalibration(void *argument)
 
 
 
-    osDelay(200);
+    osDelay(20);
   }
   /* USER CODE END StartAPPSCalibration */
 }
@@ -1277,14 +1208,14 @@ void StartTestCANSend(void *argument)
 
 	 // Tells HAL to enable reception via interrupt
 	 HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt
-
-
-	  // Send placeholder CAN messages
-	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-//	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
 //
-	 CAN_Send(RCV_MC_GeneralDataOne, WatchDogTxData, 8); // General MC data
+//
+//	  // Send placeholder CAN messages
+//	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+//	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
+////
+//	 CAN_Send(RCV_MC_GeneralDataOne, WatchDogTxData, 8); // General MC data
 
 	 osDelay(50);
   }
@@ -1393,6 +1324,8 @@ void StartCommands(void *argument)
 		}
 		case 'x': // Space bar is clicked; end pedal calibration
 		{
+			centerPedalVoltage[0] = ((maxPedalVoltage[0] - minPedalVoltage[0]) / 2);
+			centerPedalVoltage[1] = ((maxPedalVoltage[1] - minPedalVoltage[1]) / 2);
 			osThreadSuspend(APPSCalibrationHandle);
 			printf("Ending Pedal Calibration...");
 			DISPLAY_CAN_MESSAGE = 1;
