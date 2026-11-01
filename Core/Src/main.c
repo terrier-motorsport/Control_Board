@@ -239,7 +239,7 @@ uint16_t CalculatedValue = 0; // The value to be sent over to the MC over CAN
  // Creates int to determine if we are charging or not
  uint8_t isCharging = 0;
 
- static const uint8_t MAX_CAN_MESSAGES = 10;
+ static const uint8_t MAX_CAN_MESSAGES = 10; // Maximum # of CAN messages CANWatchdog checks before osDelay
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
