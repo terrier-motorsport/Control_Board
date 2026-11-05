@@ -628,7 +628,7 @@ static void MX_FDCAN1_Init(void)
   /* USER CODE END FDCAN1_Init 1 */
   hfdcan1.Instance = FDCAN1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
+  hfdcan1.Init.Mode = FDCAN_MODE_INTERNAL_LOOPBACK;
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
@@ -787,49 +787,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 	 memcpy(CANmsg.data, RxData, 8); // Passes a copy of RxData to CANmsg.data; '=' would not work here since array assignment can't be done, plus it would become a pointer
 //	 queueBufferMessage = CANmsg;
 
-//   switch (CANmsg.id){
-//    case 0x080:
-//      lastTemMessage = now;
-//      temSeen = 1;
-//      break;
-//
-//    case 0x7E3:
-//      lastAmsMessage = now;
-//      amsSeen = 1;
-//
-//      if (CANmsg.data[0] == 0xFF){
-//        isCharging = 1;
-//
-//        if (DISPLAY_CAN_ERRORS){
-//          if (CANmsg.data[1] != 0x00){
-//            printf("AMS CAN Charging Message is Corrupt.\r\n");
-//            fflush(stdout);
-//          }
-//        }
-//      } else if (CANmsg.data[0] == 0x00){
-//        isCharging = 0;
-//
-//        if (DISPLAY_CAN_ERRORS){
-//          if (CANmsg.data[1] != 0xFF){
-//            printf("AMS CAN Charging Message is Corrupt.\r\n");
-//            fflush(stdout);
-//          }
-//        }
-//      }
-//
-//      break;
-//
-//    case 0x41A: // (0x20 << 5) + 0x1a
-//      lastMcMessage = now;
-//      mcSeen = 1;
-//      break;
-//
-//    case 0x18FF50E5:
-//      lastChargerMessage = now;
-//      chargerSeen = 1;
-//      break;
-//   }
-
 	 osMessageQueuePut(CANRxQueueHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(processCANHandle, &CANmsg, 0, 0); // Adds received CAN message to CANRx queue
 	 osMessageQueuePut(DisplayDataQueueHandle, &CANmsg, 0, 0);
@@ -892,6 +849,129 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 		return 1;
 	}
 	return 0;
+}
+
+
+// Function that performs the Watchdog checks
+void watchdogCheck(CANRxMessage canMSG)
+{
+	 switch (canMSG.id){
+		case 0x080:
+		  lastTemMessage = now;
+		  temSeen = 1;
+		  break;
+
+		case 0x7E3:
+		  lastAmsMessage = now;
+		  amsSeen = 1;
+
+		  if (canMSG.data[0] == 0xFF){
+			isCharging = 1;
+
+			if (DISPLAY_CAN_ERRORS){
+			  if (canMSG.data[1] != 0x00){
+				printf("AMS CAN Charging Message is Corrupt.\r\n");
+				fflush(stdout);
+			  }
+			}
+		  } else if (canMSG.data[0] == 0x00){
+			isCharging = 0;
+
+			if (DISPLAY_CAN_ERRORS){
+			  if (canMSG.data[1] != 0xFF){
+				printf("AMS CAN Charging Message is Corrupt.\r\n");
+				fflush(stdout);
+			  }
+			}
+		  }
+
+		  break;
+
+		case 0x41A: // (0x20 << 5) + 0x1a
+		  lastMcMessage = now;
+		  mcSeen = 1;
+		  break;
+
+		case 0x18FF50E5:
+		  lastChargerMessage = now;
+		  chargerSeen = 1;
+		  break;
+	 }
+
+
+	 // Check if each message has been received over the past half second
+	 //heartBeatError = lastMessageSent(lastHeartBeatMessage);
+
+	  temError = lastMessageSent(lastTemMessage);
+	  amsError = lastMessageSent(lastAmsMessage);
+	  mcError = lastMessageSent(lastMcMessage);
+
+	  if (isCharging){
+		chargerError = lastMessageSent(lastChargerMessage);
+	  } else {
+		chargerError = 0;
+	  }
+
+	  if (temError || amsError || mcError || chargerError){
+
+		// Uses on board LED or external LEDs depending on whether the STM is in test mode
+		// BSP LED syntax will not be highlighted if not in TEST mode, and vice versa
+		#ifdef TEST_MODE
+
+			BSP_LED_On(LED_RED);
+			BSP_LED_Off(LED_GREEN);
+
+		#else
+
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
+
+		#endif
+
+
+
+		// Displays to the console any errors
+		if(DISPLAY_CAN_ERRORS){
+ //			  if(heartBeatError)
+ //			  {
+ //				  printf("Heartbeat message not received within 500ms.\r\n");
+ //				  fflush(stdout);
+ //			  }
+		  if(temError)
+		  {
+			printf("TEM message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(amsError)
+		  {
+			printf("AMS message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(mcError)
+		  {
+			printf("MC message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		  if(chargerError)
+		  {
+			printf("Charger message not received within 500ms.\r\n");
+			fflush(stdout);
+		  }
+		}
+	  } else {
+
+			#ifdef TEST_MODE
+
+		        BSP_LED_Off(LED_RED);
+		        BSP_LED_On(LED_GREEN);
+
+			#else
+
+				HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
+				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
+
+			#endif
+	  }
 }
 
 /* USER CODE END 4 */
@@ -1018,122 +1098,38 @@ void StartCANWatchdog(void *argument)
   for(;;)
   {
 
-// the following watchdog relies on receiving messages from osMessageQueueGet()
-// if nothing arrives (i.e., all ECUs are dead) it will stop functioning
+	// Process the first CAN message in a batch of 10 CAN messages
+	// the following watchdog relies on receiving messages from osMessageQueueGet()
+	// if nothing arrives (i.e., all ECUs are dead) it will stop functioning
 
 	 queueCount = osMessageQueueGetCount(CANRxQueueHandle);
 	 queueSpace = osMessageQueueGetSpace(CANRxQueueHandle);
 
-	 CANRxMessage CANmsg;
-	 osMessageQueueGet(CANRxQueueHandle, &CANmsg, NULL, 100); // Gets and removes item from CANRx queue; puts task in blocked state for 100ms if queue is full
+	 CANRxMessage canMSG;
+	 osMessageQueueGet(CANRxQueueHandle, &canMSG, NULL, 100); // Gets and removes item from CANRx queue; puts task in blocked state for 100ms if queue is full
 
 
-	 queueBufferRecieved = CANmsg; // For testing
+	 queueBufferRecieved = canMSG; // For testing
 
-// Based on the CAN ID, determines what ECU sent the message, and update the time that
-// the ECU sent it's message, as well as resetting any error
-	 switch (CANmsg.id){
-		case 0x080:
-		  lastTemMessage = now;
-		  temSeen = 1;
-		  break;
+	// Based on the CAN ID, determines what ECU sent the message, and update the time that
+	// the ECU sent it's message, as well as resetting any error
+	 watchdogCheck(canMSG);
 
-		case 0x7E3:
-		  lastAmsMessage = now;
-		  amsSeen = 1;
-
-		  if (CANmsg.data[0] == 0xFF){
-			isCharging = 1;
-
-			if (DISPLAY_CAN_ERRORS){
-			  if (CANmsg.data[1] != 0x00){
-				printf("AMS CAN Charging Message is Corrupt.\r\n");
-				fflush(stdout);
-			  }
-			}
-		  } else if (CANmsg.data[0] == 0x00){
-			isCharging = 0;
-
-			if (DISPLAY_CAN_ERRORS){
-			  if (CANmsg.data[1] != 0xFF){
-				printf("AMS CAN Charging Message is Corrupt.\r\n");
-				fflush(stdout);
-			  }
-			}
+	  // Check the 9 other CAN messages in a batch
+	  for (int i = 0; i < (MAX_CAN_MESSAGES - 1); i++)
+	  {
+		  if (osMessageQueueGet(CANRxQueueHandle, &canMSG, NULL, 100) == osOK) // Blocks for 100ms unless CAN message obtained from queue
+		  {
+			  watchdogCheck(canMSG);
 		  }
-
-		  break;
-
-		case 0x41A: // (0x20 << 5) + 0x1a
-		  lastMcMessage = now;
-		  mcSeen = 1;
-		  break;
-
-		case 0x18FF50E5:
-		  lastChargerMessage = now;
-		  chargerSeen = 1;
-		  break;
-	 }
-
-
-	 // Check if each message has been received over the past half second
-	 //heartBeatError = lastMessageSent(lastHeartBeatMessage);
-
-	  temError = lastMessageSent(lastTemMessage);
-	  amsError = lastMessageSent(lastAmsMessage);
-	  mcError = lastMessageSent(lastMcMessage);
-
-	  if (isCharging){
-		chargerError = lastMessageSent(lastChargerMessage);
-	  } else {
-		chargerError = 0;
+		  else
+		  {
+			  break;
+		  }
 	  }
 
-	  if (temError || amsError || mcError || chargerError){
-  //      BSP_LED_On(LED_RED);
-  //      BSP_LED_Off(LED_GREEN);
 
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET); // This turns the LED on
-		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_RESET);
-
-
-		// Displays to the console any errors
-		if(DISPLAY_CAN_ERRORS){
-  //			  if(heartBeatError)
-  //			  {
-  //				  printf("Heartbeat message not received within 500ms.\r\n");
-  //				  fflush(stdout);
-  //			  }
-		  if(temError)
-		  {
-			printf("TEM message not received within 500ms.\r\n");
-			fflush(stdout);
-		  }
-		  if(amsError)
-		  {
-			printf("AMS message not received within 500ms.\r\n");
-			fflush(stdout);
-		  }
-		  if(mcError)
-		  {
-			printf("MC message not received within 500ms.\r\n");
-			fflush(stdout);
-		  }
-		  if(chargerError)
-		  {
-			printf("Charger message not received within 500ms.\r\n");
-			fflush(stdout);
-		  }
-		}
-	  } else {
-  //      BSP_LED_Off(LED_RED);
-  //      BSP_LED_On(LED_GREEN);
-
-	 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET); // This turns the LED off
-	 HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
-	  }
-
-	  osDelay(20);
+	  osDelay(50);
   }
   /* USER CODE END StartCANWatchdog */
 }
@@ -1211,11 +1207,11 @@ void StartTestCANSend(void *argument)
 //
 //
 //	  // Send placeholder CAN messages
-//	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
-//	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
-	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
-////
-//	 CAN_Send(RCV_MC_GeneralDataOne, WatchDogTxData, 8); // General MC data
+	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
+	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
+//	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
+
+	 CAN_Send(RCV_MC_GeneralDataOne, WatchDogTxData, 8); // General MC data
 
 	 osDelay(50);
   }
@@ -1255,7 +1251,7 @@ void StartDataDisplay(void *argument)
 			printf(" %02X", CANPrintmsg.data[i]);
 
 		printf("\r\n");
-		osDelay(50);
+//		osDelay(50);
 
 	}
 	else
