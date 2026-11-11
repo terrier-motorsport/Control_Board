@@ -129,7 +129,13 @@ const osThreadAttr_t readCANRX_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
-
+/* Definitions for pedalErrorCheck */
+osThreadId_t pedalErrorCheckHandle;
+const osThreadAttr_t pedalErrorCheck_attributes = {
+  .name = "pedalErrorCheck",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
 /* Definitions for CANRxQueue */
 osMessageQueueId_t CANRxQueueHandle;
 const osMessageQueueAttr_t CANRxQueue_attributes = {
@@ -300,8 +306,8 @@ uint8_t packet;
 void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_FDCAN1_Init(void);
+static void MX_ADC1_Init(void);
 void ControlPedal(void *argument);
 void StartCANWatchdog(void *argument);
 void StartAPPSCalibration(void *argument);
@@ -309,6 +315,7 @@ void StartTestCANSend(void *argument);
 void StartDataDisplay(void *argument);
 void StartCommands(void *argument);
 void StartReadingCANRX(void *argument);
+void StartPedalErrorCheck(void *argument);
 
 /* USER CODE BEGIN PFP */
 void StartCANBenchController(void *argument);
@@ -406,8 +413,8 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ADC1_Init();
   MX_FDCAN1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
@@ -447,13 +454,18 @@ int main(void)
 
   /* Create the thread(s) */
 #if CAN_BENCH_TEST
+  /*
+   * Bench mode: start ONLY the selected bench task.
+   * Do not start the production watchdog, pedal-control task, or
+   * placeholder CAN sender while running the two-board test.
+   */
   if (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
   {
-    osThreadNew(StartCANBenchController, NULL, &CANBench_attributes);
+    (void)osThreadNew(StartCANBenchController, NULL, &CANBench_attributes);
   }
-  else
+  else if (CAN_BENCH_ROLE == CAN_BENCH_ROLE_DUMMY)
   {
-    osThreadNew(StartCANBenchDummy, NULL, &CANBench_attributes);
+    (void)osThreadNew(StartCANBenchDummy, NULL, &CANBench_attributes);
   }
 #else
   /* Original production tasks */
@@ -464,6 +476,7 @@ int main(void)
   DataDisplayHandle = osThreadNew(StartDataDisplay, NULL, &DataDisplay_attributes);
   CommandsHandle = osThreadNew(StartCommands, NULL, &Commands_attributes);
   readCANRXHandle = osThreadNew(StartReadingCANRX, NULL, &readCANRX_attributes);
+  pedalErrorCheckHandle = osThreadNew(StartPedalErrorCheck, NULL, &pedalErrorCheck_attributes);
 #endif
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -491,7 +504,11 @@ int main(void)
   }
 
 #if CAN_BENCH_TEST && (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
-  if (HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1) != HAL_OK)
+  /*
+   * Arm UART reception once. HAL_UART_RxCpltCallback() re-arms it
+   * after each received character.
+   */
+  if (HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1U) != HAL_OK)
   {
     Error_Handler();
   }
@@ -772,6 +789,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -1072,7 +1090,7 @@ void StartCANBenchController(void *argument)
     {
         uint8_t haveLine = 0U;
 
-        taskENTER_CRITICAL();
+        portENTER_CRITICAL();
         if (benchUartLineReady)
         {
             memcpy(line, benchUartLine, sizeof(line));
@@ -1084,7 +1102,7 @@ void StartCANBenchController(void *argument)
             benchUartLine[0] = '\0';
             haveLine = 1U;
         }
-        taskEXIT_CRITICAL();
+        portEXIT_CRITICAL();
 
         if (haveLine)
         {
@@ -1191,13 +1209,13 @@ void StartCANBenchDummy(void *argument)
 
     for (;;)
     {
-        taskENTER_CRITICAL();
+        portENTER_CRITICAL();
         mode = benchDummyMode;
         command = benchDummyCommand;
         lastRxId = benchDummyLastRxId;
         lastRxTick = benchDummyLastRxTick;
         rxCount = benchDummyRxCount;
-        taskEXIT_CRITICAL();
+        portEXIT_CRITICAL();
 
         now = HAL_GetTick();
 
@@ -1278,7 +1296,6 @@ void StartCANBenchDummy(void *argument)
 
 /* USER CODE END 4 */
 
-
 /* USER CODE BEGIN Header_ControlPedal */
 /**
   * @brief  Function implementing the PedalControl thread.
@@ -1286,7 +1303,6 @@ void StartCANBenchDummy(void *argument)
   * @retval None
   */
 /* USER CODE END Header_ControlPedal */
-
 void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
@@ -1821,6 +1837,24 @@ void StartReadingCANRX(void *argument)
     osDelay(1);
   }
   /* USER CODE END StartReadingCANRX */
+}
+
+/* USER CODE BEGIN Header_StartPedalErrorCheck */
+/**
+* @brief Function implementing the pedalErrorCheck thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartPedalErrorCheck */
+void StartPedalErrorCheck(void *argument)
+{
+  /* USER CODE BEGIN StartPedalErrorCheck */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartPedalErrorCheck */
 }
 
  /* MPU Configuration */
