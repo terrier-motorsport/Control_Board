@@ -29,6 +29,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stream_buffer.h>
 
 /* USER CODE END Includes */
 
@@ -47,6 +48,9 @@
 #define  InvertAnalogOnePedal 0 // Swap the max and min pedal voltages on analog line one
 #define  InvertAnalogTwoPedal 0 // Swap the max and min pedal voltages on analog line two
 #define TEST_MODE
+
+#define UART_BUFFER_SIZE    128
+#define COMMAND_BUFFER_SIZE 64
 
 /* USER CODE END PD */
 
@@ -134,6 +138,10 @@ const osMessageQueueAttr_t processCAN_attributes = {
   .name = "processCAN"
 };
 /* USER CODE BEGIN PV */
+
+// Variables for commands over serial
+StreamBufferHandle_t UARTStreamBuffer;
+uint8_t UART_RxByte;
 
 uint8_t DISPLAY_CAN_MESSAGE = 0;			// Turn this on/off if you want to print/ignore raw CAN Messages
 uint8_t DISPLAY_CAN_ERRORS = 0;			// Turn this on/off if you want to print/ignore CAN Errors
@@ -753,9 +761,28 @@ static void MX_GPIO_Init(void)
 // Callback function for data received on UART3/terminal
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+	uint8_t inputLength = 0;
+	uint8_t inputBuffer[6]; // Length = max characters + 1
+
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     if (huart == &hcom_uart[COM1]) // Checks which COM/UART triggered the callback function. In this case, COM1/UART3
     {
         printf("Received: %c\r\n", serialByte); // Echoes back what was inputed into the terminal
+
+        if (serialByte == '\r' || inputLength == 5) // Checks if enter is pressed or five characters have been inputed
+        {
+        	inputBuffer[inputLength] = '\0'; // Delimiter once enter is clicked or the character limit is reached
+
+            printf("Message: %s\r\n", inputBuffer);
+            printf("Length: %d\r\n", inputLength);
+
+            inputLength = 0; // Reset length of input to 0
+        }
+        else if (inputLength < sizeof(inputBuffer) - 1) // Size - 1 because one element is used for the delimiter
+        {
+        	inputBuffer[inputLength++] = serialByte;
+        }
 
         HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
     }
@@ -778,9 +805,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
 //	 lastMessage = HAL_GetTick();
 	 
-   now = HAL_GetTick();
+	 now = HAL_GetTick();
 //   BSP_LED_On(LED_RED);
-   CANRxMessage CANmsg;
+   	 CANRxMessage CANmsg;
 	 CANmsg.id = RxHeader.Identifier;
 	 CANmsg.idType = RxHeader.IdType;
 	 CANmsg.dataLength = RxHeader.DataLength;
@@ -1183,7 +1210,7 @@ void StartAPPSCalibration(void *argument)
 
 
 
-    osDelay(20);
+    //osDelay(20); // Take off for now to allow give scheduler full control of switching
   }
   /* USER CODE END StartAPPSCalibration */
 }
@@ -1202,11 +1229,7 @@ void StartTestCANSend(void *argument)
   for(;;)
   {
 
-	 // Tells HAL to enable reception via interrupt
-	 HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt
-//
-//
-//	  // Send placeholder CAN messages
+	 // Send placeholder CAN messages
 	 CAN_Send(0x080, WatchDogTxData, 8); // TEM message
 	 CAN_Send(0x7E3, WatchDogTxData, 8); // AMS message
 //	 CAN_Send(cmdDriveEnable, WatchDogTxData, 8); // MC message
@@ -1251,7 +1274,7 @@ void StartDataDisplay(void *argument)
 			printf(" %02X", CANPrintmsg.data[i]);
 
 		printf("\r\n");
-//		osDelay(50);
+//		osDelay(50); // Commented out to allow scheduler to take control of context switch
 
 	}
 	else
@@ -1335,10 +1358,21 @@ void StartCommands(void *argument)
 //			toggleCANRx = !toggleCANRx; // toggles the value of toggleCANRx; 0 -> 1, 1 -> 0
 //			break;
 //		}
+		#ifdef TEST_MODE
+			case 'p': // Allows values to be entered for CAN pedal control
+			{
+				BSP_LED_Toggle(LED_RED);
+			}
+		#endif
 
 		default: break;
 	}
 	serialByte = 0;
+
+	 // Tells HAL to enable reception via interrupt
+	 // Tells HAL to continue waiting for another byte of data from the terminal
+	 // Commands do not work if this is commented out
+	 HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt;
 
    osDelay(50);
   }
