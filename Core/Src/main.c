@@ -54,9 +54,8 @@
 #define CAN_BENCH_TEST              1
 #define CAN_BENCH_ROLE_CONTROLLER   1
 #define CAN_BENCH_ROLE_DUMMY        2
-#define CAN_BENCH_ROLE              CAN_BENCH_ROLE_CONTROLLER
+#define CAN_BENCH_ROLE              CAN_BENCH_ROLE_DUMMY
 
-#define CAN_BENCH_UART_LINE_SIZE    32U
 #define CAN_BENCH_TX_TIMEOUT_MS     100U
 #define CAN_BENCH_RX_TIMEOUT_MS     1000U
 
@@ -188,11 +187,6 @@ uint32_t TxMailbox; // The number of the email box that transmitted the Tx messa
 uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 
 #if CAN_BENCH_TEST
-static char benchUartLine[CAN_BENCH_UART_LINE_SIZE];
-static volatile uint8_t benchUartLineIndex = 0;
-static volatile uint8_t benchUartLineReady = 0;
-static volatile uint8_t benchUartLineOverflow = 0;
-
 typedef enum
 {
     BENCH_MODE_NO_MESSAGE = 0,
@@ -414,7 +408,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_FDCAN1_Init();
+#if !CAN_BENCH_TEST || (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
+  /* The dummy receiver does not sample the potentiometer. */
   MX_ADC1_Init();
+#endif
   /* USER CODE BEGIN 2 */
 
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
@@ -424,7 +421,10 @@ int main(void)
   /* USER CODE END 2 */
 
   /* Init scheduler */
-  osKernelInitialize();
+  if (osKernelInitialize() != osOK)
+  {
+    Error_Handler();
+  }
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -438,15 +438,19 @@ int main(void)
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
-  /* Create the queue(s) */
-  /* creation of CANRxQueue */
-  CANRxQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &CANRxQueue_attributes);
+#if !CAN_BENCH_TEST
+  /* Production queues are not needed by either bench-test role. */
+  CANRxQueueHandle = osMessageQueueNew(16U, sizeof(CANRxMessage), &CANRxQueue_attributes);
+  DisplayDataQueueHandle = osMessageQueueNew(16U, sizeof(CANRxMessage), &DisplayDataQueue_attributes);
+  processCANHandle = osMessageQueueNew(16U, sizeof(CANRxMessage), &processCAN_attributes);
 
-  /* creation of DisplayDataQueue */
-  DisplayDataQueueHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &DisplayDataQueue_attributes);
-
-  /* creation of processCAN */
-  processCANHandle = osMessageQueueNew (16, sizeof(CANRxMessage), &processCAN_attributes);
+  if (CANRxQueueHandle == NULL ||
+      DisplayDataQueueHandle == NULL ||
+      processCANHandle == NULL)
+  {
+    Error_Handler();
+  }
+#endif
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -461,11 +465,17 @@ int main(void)
    */
   if (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
   {
-    (void)osThreadNew(StartCANBenchController, NULL, &CANBench_attributes);
+    if (osThreadNew(StartCANBenchController, NULL, &CANBench_attributes) == NULL)
+    {
+      Error_Handler();
+    }
   }
   else if (CAN_BENCH_ROLE == CAN_BENCH_ROLE_DUMMY)
   {
-    (void)osThreadNew(StartCANBenchDummy, NULL, &CANBench_attributes);
+    if (osThreadNew(StartCANBenchDummy, NULL, &CANBench_attributes) == NULL)
+    {
+      Error_Handler();
+    }
   }
 #else
   /* Original production tasks */
@@ -477,6 +487,18 @@ int main(void)
   CommandsHandle = osThreadNew(StartCommands, NULL, &Commands_attributes);
   readCANRXHandle = osThreadNew(StartReadingCANRX, NULL, &readCANRX_attributes);
   pedalErrorCheckHandle = osThreadNew(StartPedalErrorCheck, NULL, &pedalErrorCheck_attributes);
+
+  if (PedalControlHandle == NULL ||
+      CANWatchdogHandle == NULL ||
+      APPSCalibrationHandle == NULL ||
+      TestCANSendHandle == NULL ||
+      DataDisplayHandle == NULL ||
+      CommandsHandle == NULL ||
+      readCANRXHandle == NULL ||
+      pedalErrorCheckHandle == NULL)
+  {
+    Error_Handler();
+  }
 #endif
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -503,19 +525,11 @@ int main(void)
     Error_Handler();
   }
 
-#if CAN_BENCH_TEST && (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
-  /*
-   * Arm UART reception once. HAL_UART_RxCpltCallback() re-arms it
-   * after each received character.
-   */
-  if (HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1U) != HAL_OK)
+  /* Start scheduler */
+  if (osKernelStart() != osOK)
   {
     Error_Handler();
   }
-#endif
-
-  /* Start scheduler */
-  osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -642,7 +656,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Channel = ADC_CHANNEL_15;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_64CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
@@ -682,6 +696,12 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
+  /*
+   * With a 96 MHz FDCAN kernel clock these values produce 250 kbit/s:
+   * 96 MHz / (16 * (1 + 20 + 3)) = 250 kbit/s.
+   * Verify the FDCAN kernel-clock mux/source in stm32h7xx_hal_msp.c or
+   * the CubeMX .ioc configuration; both boards must use the same bitrate.
+   */
   hfdcan1.Init.NominalPrescaler = 16;
   hfdcan1.Init.NominalSyncJumpWidth = 1;
   hfdcan1.Init.NominalTimeSeg1 = 20;
@@ -798,6 +818,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
 
+  /* Configure PA3 as ADC1_INP15 for the bench potentiometer. */
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pin : PC3 */
   GPIO_InitStruct.Pin = GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -823,50 +849,16 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 
-// UART receive callback. Keep this short: parsing and printf happen in the task.
+// UART receive callback. UART commands are used only by the production task set.
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-#if CAN_BENCH_TEST && (CAN_BENCH_ROLE == CAN_BENCH_ROLE_CONTROLLER)
     if (huart == &hcom_uart[COM1])
     {
-        char c = (char)serialByte;
-
-        if (!benchUartLineReady)
-        {
-            if (c == '\r' || c == '\n')
-            {
-                if (benchUartLineIndex > 0U || benchUartLineOverflow)
-                {
-                    benchUartLine[benchUartLineIndex] = '\0';
-                    benchUartLineReady = 1U;
-                }
-            }
-            else if (c == '\b' || c == 0x7F)
-            {
-                if (benchUartLineIndex > 0U)
-                {
-                    benchUartLineIndex--;
-                }
-            }
-            else if (benchUartLineIndex < (CAN_BENCH_UART_LINE_SIZE - 1U))
-            {
-                benchUartLine[benchUartLineIndex++] = c;
-            }
-            else
-            {
-                benchUartLineOverflow = 1U;
-            }
-        }
-
-        (void)HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1U);
-    }
-#else
-    if (huart == &hcom_uart[COM1])
-    {
+#if !CAN_BENCH_TEST
         printf("Received: %c\r\n", serialByte);
+#endif
         (void)HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1U);
     }
-#endif
 }
 
 // Callback function for data received on FIFO0
@@ -892,6 +884,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
      * The first two payload bytes contain a 16-bit big-endian command.
      */
     if (RxHeader.IdType == FDCAN_STANDARD_ID &&
+        RxHeader.RxFrameType == FDCAN_DATA_FRAME &&
         RxHeader.DataLength == FDCAN_DLC_BYTES_8)
     {
         uint16_t value = ((uint16_t)RxData[0] << 8) | (uint16_t)RxData[1];
@@ -914,7 +907,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
             benchDummyRxCount++;
         }
     }
-#else
+#elif !CAN_BENCH_TEST
     uint32_t now = HAL_GetTick();
     CANRxMessage CANmsg;
     CANmsg.id = RxHeader.Identifier;
@@ -1063,128 +1056,139 @@ uint8_t lastMessageSent(uint32_t lastMessage){
 #if CAN_BENCH_TEST
 
 /*
- * STM #1 task: enter a simulated APPS voltage in the UART terminal.
+ * STM #1 task: read a potentiometer as a simulated APPS voltage and send CAN.
  * STM #2 task: receive the matching MC command and display its mode on LEDs.
  */
 void StartCANBenchController(void *argument)
 {
-    char line[CAN_BENCH_UART_LINE_SIZE];
-    char *end;
-    uint8_t lineOverflow;
-    float voltage;
+    uint32_t adcRaw;
     uint32_t voltageMilli;
     uint16_t command;
     uint32_t canId;
     uint8_t payload[8];
+    float voltage;
+    HAL_StatusTypeDef adcStatus;
     HAL_StatusTypeDef txStatus;
+    uint32_t lastPrintTick = 0U;
+    uint32_t lastPrintVoltage = 0xFFFFFFFFU;
+    uint32_t lastPrintCommand = 0xFFFFFFFFU;
+    uint32_t lastPrintId = 0xFFFFFFFFU;
 
     (void)argument;
 
-    printf("\r\nCAN bench controller ready.\r\n");
-    printf("Enter pedal voltage from 0.50 to 3.30 V, then press Enter.\r\n");
-    printf("Center voltage: 2.00 V\r\n");
-    printf("\r\n> ");
+    printf("\r\nCAN bench controller ready. Potentiometer input: PA3 / ADC1_INP15 (A0).\r\n");
+    printf("Production TEM/AMS/MC watchdog checks are disabled in bench mode.\r\n");
+    printf("Expected pedal range: 0.50-3.30 V; center: 2.00 V.\r\n");
+    printf("Sampling and transmitting continuously at approximately 50 Hz.\r\n");
     fflush(stdout);
 
     for (;;)
     {
-        uint8_t haveLine = 0U;
-
-        portENTER_CRITICAL();
-        if (benchUartLineReady)
+        /* Read the potentiometer voltage using ADC1 channel 15 (PA3). */
+        adcStatus = HAL_ADC_Start(&hadc1);
+        if (adcStatus == HAL_OK)
         {
-            memcpy(line, benchUartLine, sizeof(line));
-            line[sizeof(line) - 1U] = '\0';
-            lineOverflow = benchUartLineOverflow;
-            benchUartLineReady = 0U;
-            benchUartLineOverflow = 0U;
-            benchUartLineIndex = 0U;
-            benchUartLine[0] = '\0';
-            haveLine = 1U;
+            adcStatus = HAL_ADC_PollForConversion(&hadc1, 20U);
         }
-        portEXIT_CRITICAL();
 
-        if (haveLine)
+        if (adcStatus != HAL_OK)
         {
-            if (lineOverflow)
+            (void)HAL_ADC_Stop(&hadc1);
+            printf("ADC conversion failed.\r\n");
+            fflush(stdout);
+            osDelay(20U);
+            continue;
+        }
+
+        adcRaw = HAL_ADC_GetValue(&hadc1);
+        (void)HAL_ADC_Stop(&hadc1);
+
+        /* Convert 16-bit ADC reading to approximate input voltage.
+           The potentiometer should be powered from the board's 3V3 rail. */
+        voltage = ((float)adcRaw * 3.3f) / 65535.0f;
+        voltageMilli = (uint32_t)(voltage * 1000.0f + 0.5f);
+
+        /* Reject readings outside the calibrated pedal operating range.
+           No CAN command is sent for an invalid/low input. */
+        if (voltage < MinPedalVoltage[0] ||
+            voltage > MaxPedalVoltage[0])
+        {
+            if ((HAL_GetTick() - lastPrintTick) >= 500U)
             {
-                printf("Input too long. Please enter a number only.\r\n");
-            }
-            else
-            {
-                voltage = strtof(line, &end);
-                while (*end == ' ' || *end == '\t')
-                {
-                    end++;
-                }
-
-                if (end == line || *end != '\0' ||
-                    voltage != voltage ||
-                    voltage < MinPedalVoltage[0] ||
-                    voltage > MaxPedalVoltage[0])
-                {
-                    printf("Invalid input. Enter a numeric voltage from 0.50 to 3.30 V.\r\n");
-                }
-                else
-                {
-                    memset(payload, 0, sizeof(payload));
-                    voltageMilli = (uint32_t)(voltage * 1000.0f + 0.5f);
-
-                    if (voltage > CenterPedalVoltage[0])
-                    {
-                        canId = CMD_SetRelativeCurrent;
-                        command = (uint16_t)(
-                            ((voltage - CenterPedalVoltage[0]) /
-                             (MaxPedalVoltage[0] - CenterPedalVoltage[0])) * 1000.0f);
-
-                        /* Preserve a nonzero mode marker just above center. */
-                        if (command == 0U)
-                        {
-                            command = 1U;
-                        }
-                    }
-                    else if (voltage < CenterPedalVoltage[0])
-                    {
-                        canId = CMD_SetRelativeBrakeCurrent;
-                        command = (uint16_t)(
-                            ((voltage - MinPedalVoltage[0]) /
-                             (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000.0f);
-                    }
-                    else
-                    {
-                        /* A zero-current command is used for neutral in this bench test. */
-                        canId = CMD_SetRelativeCurrent;
-                        command = 0U;
-                    }
-
-                    payload[0] = (uint8_t)((command >> 8) & 0xFFU);
-                    payload[1] = (uint8_t)(command & 0xFFU);
-
-                    txStatus = CAN_Send(canId, payload, 8U);
-
-                    if (txStatus == HAL_OK)
-                    {
-                        printf("Input %lu.%03lu V | %s | CAN ID 0x%03lX | command %u | queued\r\n",
-                               (unsigned long)(voltageMilli / 1000U),
-                               (unsigned long)(voltageMilli % 1000U),
-                               (voltage > CenterPedalVoltage[0]) ? "THROTTLE" :
-                               (voltage < CenterPedalVoltage[0]) ? "REGEN" : "NEUTRAL",
-                               (unsigned long)canId,
-                               (unsigned int)command);
-                    }
-                    else
-                    {
-                        printf("CAN enqueue failed: status=%d, FDCAN error=0x%08lX\r\n",
-                               (int)txStatus, (unsigned long)HAL_FDCAN_GetError(&hfdcan1));
-                    }
-                }
+                printf("Pot %.3f V (ADC %lu): outside valid range %.2f-%.2f V; CAN not sent.\r\n",
+                       voltage,
+                       (unsigned long)adcRaw,
+                       MinPedalVoltage[0],
+                       MaxPedalVoltage[0]);
+                fflush(stdout);
+                lastPrintTick = HAL_GetTick();
             }
 
-            printf("> ");
+            osDelay(20U);
+            continue;
+        }
+
+        memset(payload, 0, sizeof(payload));
+
+        if (voltage > CenterPedalVoltage[0])
+        {
+            canId = CMD_SetRelativeCurrent;
+            command = (uint16_t)(
+                ((voltage - CenterPedalVoltage[0]) /
+                 (MaxPedalVoltage[0] - CenterPedalVoltage[0])) * 1000.0f);
+
+            /* Preserve a nonzero marker just above center for the dummy LED logic. */
+            if (command == 0U)
+            {
+                command = 1U;
+            }
+        }
+        else if (voltage < CenterPedalVoltage[0])
+        {
+            canId = CMD_SetRelativeBrakeCurrent;
+            command = (uint16_t)(
+                ((voltage - MinPedalVoltage[0]) /
+                 (CenterPedalVoltage[0] - MinPedalVoltage[0])) * 1000.0f);
+        }
+        else
+        {
+            canId = CMD_SetRelativeCurrent;
+            command = 0U;
+        }
+
+        payload[0] = (uint8_t)((command >> 8) & 0xFFU);
+        payload[1] = (uint8_t)(command & 0xFFU);
+
+        txStatus = CAN_Send(canId, payload, 8U);
+
+        /* Print only when the displayed command changes, or every 500 ms. */
+        if (txStatus != HAL_OK)
+        {
+            printf("CAN enqueue failed: status=%d, FDCAN error=0x%08lX\r\n",
+                   (int)txStatus, (unsigned long)HAL_FDCAN_GetError(&hfdcan1));
             fflush(stdout);
         }
+        else if (voltageMilli != lastPrintVoltage ||
+                 (uint32_t)command != lastPrintCommand ||
+                 canId != lastPrintId ||
+                 (HAL_GetTick() - lastPrintTick) >= 500U)
+        {
+            printf("Pot %lu.%03lu V | %s | CAN ID 0x%03lX | command %u\r\n",
+                   (unsigned long)(voltageMilli / 1000U),
+                   (unsigned long)(voltageMilli % 1000U),
+                   (voltage > CenterPedalVoltage[0]) ? "THROTTLE" :
+                   (voltage < CenterPedalVoltage[0]) ? "REGEN" : "NEUTRAL",
+                   (unsigned long)canId,
+                   (unsigned int)command);
+            fflush(stdout);
 
-        osDelay(5U);
+            lastPrintVoltage = voltageMilli;
+            lastPrintCommand = (uint32_t)command;
+            lastPrintId = canId;
+            lastPrintTick = HAL_GetTick();
+        }
+
+        osDelay(20U);
     }
 }
 
@@ -1206,6 +1210,7 @@ void StartCANBenchDummy(void *argument)
     (void)argument;
 
     printf("\r\nCAN bench dummy MC ready. Waiting for STM #1...\r\n");
+    printf("Production TEM/AMS/MC watchdog checks are disabled in bench mode.\r\n");
 
     for (;;)
     {
@@ -1403,6 +1408,22 @@ void ControlPedal(void *argument)
 /* USER CODE END Header_StartCANWatchdog */
 void StartCANWatchdog(void *argument)
 {
+#if CAN_BENCH_TEST
+  /*
+   * Bench-test safety guard: the production ECU watchdog is intentionally
+   * disabled while testing with the two STM32 boards. No TEM, AMS, or MC
+   * heartbeat messages are expected on this isolated bench CAN bus.
+   *
+   * The normal bench startup already does not create this task; this guard
+   * also prevents watchdog output if the task is accidentally created.
+   */
+  (void)argument;
+  for (;;)
+  {
+    osDelay(1000U);
+  }
+#else
+
   /* USER CODE BEGIN StartCANWatchdog */
   /* Infinite loop */
   for(;;)
@@ -1593,6 +1614,7 @@ void StartCANWatchdog(void *argument)
 */
   }
   /* USER CODE END StartCANWatchdog */
+#endif /* CAN_BENCH_TEST */
 }
 
 /* USER CODE BEGIN Header_StartAPPSCalibration */
