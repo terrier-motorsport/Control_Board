@@ -318,13 +318,15 @@ CANRxMessage queueBufferRecieved; // Data being read from the queue
 
 
 // System states
+// Bit masks all the states; each state is assigned a 1 and shifted some amount
 typedef enum
 {
-	PEDAL_CALIBRATION, // Assigned 0
-	MOTOR_SPINNING,    // Assigned 1
-	WATCHDOG_FAULTED,  // Assigned 2
-	FAULT, 			   // Assigned 3
-	READY,			   // Assigned 4
+	PEDAL_CALIBRATION 	= (1U << 0), // Assigned 0000 0001
+	CAN_PEDAL_CONTROL	= (1U << 1), // Assigned 0000 0010
+	MOTOR_SPINNING  	= (1U << 2), // Assigned 0000 0100
+	WATCHDOG_FAULTED  	= (1U << 3), // Assigned 0000 1000
+	FAULT  				= (1U << 4), // Assigned 0001 0000 (Non-Watchdog Fault)
+	READY  				= (1U << 5), // Assigned 0010 0000
 } State;
 
 volatile State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
@@ -1038,8 +1040,18 @@ void ControlPedal(void *argument)
 //	  TxData[1] = 1 & 0xFF;          // 0xc8
 
 #ifdef TEST_MODE
-      inputPedalVoltage[0] = testPedalVoltage[0];
-      inputPedalVoltage[1] = testPedalVoltage[1];
+
+	  if(0) // Check if state is in serial CAN control
+	  {
+
+
+	  }
+	  else // Use analog control
+	  {
+	      inputPedalVoltage[0] = testPedalVoltage[0];
+	      inputPedalVoltage[1] = testPedalVoltage[1];
+	  }
+
 #else
 	  //	UBaseType_t highWaterMark;
 
@@ -1337,6 +1349,10 @@ void StartCommands(void *argument)
 
     	if (commandIndex > 1)
     	{
+    		if (1) // Check if state is serial CAN control
+    		{
+
+    		}
     		commandIndex = 0;
     		printf("Multi-character input \r\n");
     	}

@@ -23,25 +23,25 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   ALLOC
   9 .ARM.attributes 0000002e  00000000  00000000  00016214  2**0
                   CONTENTS, READONLY
- 10 .debug_info   0002f81c  00000000  00000000  00016242  2**0
+ 10 .debug_info   0002f822  00000000  00000000  00016242  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 11 .debug_abbrev 00004f6a  00000000  00000000  00045a5e  2**0
+ 11 .debug_abbrev 00004f6a  00000000  00000000  00045a64  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 12 .debug_aranges 00002370  00000000  00000000  0004a9c8  2**3
+ 12 .debug_aranges 00002370  00000000  00000000  0004a9d0  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_rnglists 00001b9d  00000000  00000000  0004cd38  2**0
+ 13 .debug_rnglists 00001b9d  00000000  00000000  0004cd40  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 14 .debug_macro  000069ae  00000000  00000000  0004e8d5  2**0
+ 14 .debug_macro  000069ae  00000000  00000000  0004e8dd  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 15 .debug_line   0002a909  00000000  00000000  00055283  2**0
+ 15 .debug_line   0002a90b  00000000  00000000  0005528b  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_str    0017f3c6  00000000  00000000  0007fb8c  2**0
+ 16 .debug_str    0017f3d8  00000000  00000000  0007fb96  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .comment      00000043  00000000  00000000  001fef52  2**0
+ 17 .comment      00000043  00000000  00000000  001fef6e  2**0
                   CONTENTS, READONLY
- 18 .debug_frame  0000a0d4  00000000  00000000  001fef98  2**2
+ 18 .debug_frame  0000a0d4  00000000  00000000  001fefb4  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .debug_line_str 00000056  00000000  00000000  0020906c  2**0
+ 19 .debug_line_str 00000056  00000000  00000000  00209088  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -2191,17 +2191,17 @@ void ControlPedal(void *argument)
  800119a:	21ff      	movs	r1, #255	@ 0xff
  800119c:	485e      	ldr	r0, [pc, #376]	@ (8001318 <ControlPedal+0x1f8>)
  800119e:	f010 fe91 	bl	8011ec4 <memset>
-//	  pedalTxHeader.Identifier = CMD_DriveEnable;
-//	  TxData[0] = (1 >> 8) & 0xFF;   // 0x00
-//	  TxData[1] = 1 & 0xFF;          // 0xc8
 
-#ifdef TEST_MODE
-      inputPedalVoltage[0] = testPedalVoltage[0];
+
+	  }
+	  else // Use analog control
+	  {
+	      inputPedalVoltage[0] = testPedalVoltage[0];
  80011a2:	4b5e      	ldr	r3, [pc, #376]	@ (800131c <ControlPedal+0x1fc>)
  80011a4:	681b      	ldr	r3, [r3, #0]
  80011a6:	4a5e      	ldr	r2, [pc, #376]	@ (8001320 <ControlPedal+0x200>)
  80011a8:	6013      	str	r3, [r2, #0]
-      inputPedalVoltage[1] = testPedalVoltage[1];
+	      inputPedalVoltage[1] = testPedalVoltage[1];
  80011aa:	4b5c      	ldr	r3, [pc, #368]	@ (800131c <ControlPedal+0x1fc>)
  80011ac:	685b      	ldr	r3, [r3, #4]
  80011ae:	4a5c      	ldr	r2, [pc, #368]	@ (8001320 <ControlPedal+0x200>)
@@ -2848,6 +2848,10 @@ void StartCommands(void *argument)
  80015d2:	2b01      	cmp	r3, #1
  80015d4:	d905      	bls.n	80015e2 <StartCommands+0x6e>
     	{
+    		if (1) // Check if state is serial CAN control
+    		{
+
+    		}
     		commandIndex = 0;
  80015d6:	2300      	movs	r3, #0
  80015d8:	81fb      	strh	r3, [r7, #14]
@@ -2928,7 +2932,7 @@ void StartCommands(void *argument)
  8001672:	4b42      	ldr	r3, [pc, #264]	@ (800177c <StartCommands+0x208>)
  8001674:	781b      	ldrb	r3, [r3, #0]
  8001676:	b2db      	uxtb	r3, r3
- 8001678:	2b01      	cmp	r3, #1
+ 8001678:	2b04      	cmp	r3, #4
  800167a:	d052      	beq.n	8001722 <StartCommands+0x1ae>
 					{
 						break;
@@ -3173,7 +3177,7 @@ void StartPedalErrorCheck(void *argument)
 	{
 		currentState = FAULT;
  8001830:	4b0b      	ldr	r3, [pc, #44]	@ (8001860 <StartPedalErrorCheck+0xa4>)
- 8001832:	2203      	movs	r2, #3
+ 8001832:	2210      	movs	r2, #16
  8001834:	701a      	strb	r2, [r3, #0]
  8001836:	e002      	b.n	800183e <StartPedalErrorCheck+0x82>
 //		BSP_LED_Toggle(LED_YELLOW);
@@ -3182,7 +3186,7 @@ void StartPedalErrorCheck(void *argument)
 	{
 		currentState = READY;
  8001838:	4b09      	ldr	r3, [pc, #36]	@ (8001860 <StartPedalErrorCheck+0xa4>)
- 800183a:	2204      	movs	r2, #4
+ 800183a:	2220      	movs	r2, #32
  800183c:	701a      	strb	r2, [r3, #0]
 	}
     osDelay(50);
