@@ -29,7 +29,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <math.h>
-#include <stream_buffer.h>
+#include "stream_buffer.h"
 
 /* USER CODE END Includes */
 
@@ -50,7 +50,8 @@
 #define TEST_MODE
 
 #define UART_BUFFER_SIZE    128
-#define COMMAND_BUFFER_SIZE 64
+#define COMMAND_BUFFER_SIZE 5
+#define TRIGGER 1
 
 /* USER CODE END PD */
 
@@ -141,6 +142,9 @@ const osMessageQueueAttr_t processCAN_attributes = {
 
 // Variables for commands over serial
 StreamBufferHandle_t UARTStreamBuffer;
+uint8_t receivedByte = 0; // variable to store byte received from the steam buffer
+char commandBuffer[COMMAND_BUFFER_SIZE]; // Buffer to contain commands
+
 uint8_t UART_RxByte;
 
 uint8_t DISPLAY_CAN_MESSAGE = 0;			// Turn this on/off if you want to print/ignore raw CAN Messages
@@ -169,7 +173,6 @@ uint8_t WatchDogTxData[8] = {1, 0, 0, 0, 0, 0, 0, 0}; // Random Buffer data to s
 uint8_t RxData[8]; // Buffer of the received data (8 bytes data)
 uint32_t TxMailbox; // The number of the email box that transmitted the Tx message
 
-uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -216,7 +219,7 @@ char msg[20];
 char CANBuffer[100]; // Buffer used to display CAN messages on terminal
 uint16_t CalculatedValue = 0; // The value to be sent over to the MC over CAN
 
-
+uint8_t serialByte; // Rx buffer for data received via USART3/terminal
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////CAN Watchdog /////////////////////////////////////////////
@@ -373,6 +376,7 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -391,6 +395,7 @@ int main(void)
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
   HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
 
+  UARTStreamBuffer = xStreamBufferCreate(UART_BUFFER_SIZE, TRIGGER);
 
   /* USER CODE END 2 */
 
@@ -761,30 +766,23 @@ static void MX_GPIO_Init(void)
 // Callback function for data received on UART3/terminal
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	uint8_t inputLength = 0;
-	uint8_t inputBuffer[6]; // Length = max characters + 1
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE; // Need to explain this later
 
-	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     if (huart == &hcom_uart[COM1]) // Checks which COM/UART triggered the callback function. In this case, COM1/UART3
     {
-        printf("Received: %c\r\n", serialByte); // Echoes back what was inputed into the terminal
+//    	printf("Received: %c\r\n", serialByte); // Echoes back what was inputed into the terminal
 
-        if (serialByte == '\r' || inputLength == 5) // Checks if enter is pressed or five characters have been inputed
-        {
-        	inputBuffer[inputLength] = '\0'; // Delimiter once enter is clicked or the character limit is reached
+    	 // Stores received byte into the streambuffer
+		 xStreamBufferSendFromISR(
+				 UARTStreamBuffer, // The handle of the stream buffer to which a stream is being sent.
+				 &serialByte, // Pointer to buffer that holds the values to be copied into the stream buffer
+				 1, //
+				 &xHigherPriorityTaskWoken );
 
-            printf("Message: %s\r\n", inputBuffer);
-            printf("Length: %d\r\n", inputLength);
+        HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1); // Tells HAL to continue waiting for 1  byte of data from the terminal
 
-            inputLength = 0; // Reset length of input to 0
-        }
-        else if (inputLength < sizeof(inputBuffer) - 1) // Size - 1 because one element is used for the delimiter
-        {
-        	inputBuffer[inputLength++] = serialByte;
-        }
-
-        HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1); // Tells HAL to continue waiting for another byte of data from the terminal
+        portYIELD_FROM_ISR( xHigherPriorityTaskWoken ); // Allows higher priority task to execute immediately after the ISR exits.
     }
 }
 
@@ -1295,86 +1293,140 @@ void StartDataDisplay(void *argument)
 void StartCommands(void *argument)
 {
   /* USER CODE BEGIN StartCommands */
+
+	if( UARTStreamBuffer == NULL )
+	{
+	  /* There was not enough heap memory space available to create the
+		 stream buffer. */
+	  printf("Stream creation unsuccessful \r\n");
+	}
+	else
+  	{
+	  /* The stream buffer was created successfully and can now be used. */
+	  printf("Stream Buffer Created \r\n");
+  	}
+
+//	uint8_t receivedByte = 0; // variable to store byte received from the steam buffer
+
+	uint8_t charCommand = 0;
+
+//	char commandBuffer[COMMAND_BUFFER_SIZE]; // Buffer to contain commands
+	uint16_t commandIndex = 0; // Index for buffer
+
+	memset(commandBuffer, 0, sizeof(commandBuffer));   // Initialize commandBuffer to have all 0s
+
+	HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt;
+
   /* Infinite loop */
   for(;;)
   {
 
+	// Wait until one byte is received
+    xStreamBufferReceive(
+        UARTStreamBuffer,
+        &receivedByte, // Reference to variable to store the received byte
+        1,
+        portMAX_DELAY // Wait forever, indefinitely blocks the tasks
+    );
 
-	switch(serialByte) // Reads values as ascii characters; numbers need to be converted to char type before checking
-	{
-		case 'a':
-		{
-//			osThreadSuspend(DataDisplayHandle);
-			DISPLAY_CAN_MESSAGE = 0;
-//			DISPLAY_CAN_ERRORS = 0;
-			break;
-		}
-		case 'd':
-		{
-//			osThreadResume(DataDisplayHandle);
-			DISPLAY_CAN_MESSAGE = 1;
-//			DISPLAY_CAN_ERRORS = 1;
-			osThreadResume(DataDisplayHandle);
-			break;
-		}
-		case 'c': // Begin pedal calibration
-		{
-			if (currentState == MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
+
+
+    if (receivedByte == 'y') // Check if enter was pressed (corresponds to the end of a command)
+    {
+    	commandBuffer[commandIndex] = 'F'; // Marks the end of the command
+
+    	if (commandIndex > 1)
+    	{
+    		commandIndex = 0;
+    		printf("Multi-character input \r\n");
+    	}
+    	else
+    	{
+
+    		charCommand = commandBuffer[0];
+    		switch(charCommand) // Reads values as ascii characters; numbers need to be converted to char type before checking
 			{
-				break;
+				case 'a':
+				{
+					//osThreadSuspend(DataDisplayHandle);
+					DISPLAY_CAN_MESSAGE = 0;
+					//DISPLAY_CAN_ERRORS = 0;
+					break;
+				}
+				case 'd':
+				{
+					//osThreadResume(DataDisplayHandle);
+					DISPLAY_CAN_MESSAGE = 1;
+					//DISPLAY_CAN_ERRORS = 1;
+					osThreadResume(DataDisplayHandle);
+					break;
+				}
+				case 'c': // Begin pedal calibration
+				{
+					if (currentState == MOTOR_SPINNING) // Don't allow calibration to begin if the motor is still rotating
+					{
+						break;
+					}
+
+					DISPLAY_CAN_MESSAGE = 0;
+					printf("Starting Pedal Calibration... \r\n");
+					status3 = osThreadSuspend(PedalControlHandle); // Suspends pedal control task
+
+					//osDelay(50);
+
+					// start at the opposite end and calibrate towards the desired end
+					// 0.0 --up--> max
+					// 3.3 -down-> min
+					maxPedalVoltage[0] = 0.0f;
+					minPedalVoltage[0] = 3.3f;
+
+					printf("Click enter to complete calibration \r\n");
+					osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
+
+					break; // Without break, other cases below will all execute until a break statement occurs
+				}
+				case 'x': // Space bar is clicked; end pedal calibration
+				{
+					centerPedalVoltage[0] = ((maxPedalVoltage[0] - minPedalVoltage[0]) / 2);
+					centerPedalVoltage[1] = ((maxPedalVoltage[1] - minPedalVoltage[1]) / 2);
+					osThreadSuspend(APPSCalibrationHandle);
+					printf("Ending Pedal Calibration...");
+					DISPLAY_CAN_MESSAGE = 1;
+					osThreadResume(PedalControlHandle);
+
+					//osThreadResume(DataDisplayHandle);
+					break;
+				}
+				// case 't': // Toggles display variable for displaying CAN messages
+				// {
+				// toggleCANRx = !toggleCANRx; // toggles the value of toggleCANRx; 0 -> 1, 1 -> 0
+				// break;
+				// }
+				#ifdef TEST_MODE
+					case 'p': // Allows values to be entered for CAN pedal control
+					{
+						BSP_LED_Toggle(LED_RED);
+					}
+				#endif
+
+				default: break;
 			}
-
-			DISPLAY_CAN_MESSAGE = 0;
-			printf("Starting Pedal Calibration... \r\n");
-			status3 = osThreadSuspend(PedalControlHandle); // Suspends pedal control task
-
-//			osDelay(50);
-
-      // start at the opposite end and calibrate towards the desired end 
-      // 0.0 --up--> max 
-      // 3.3 -down-> min
-			maxPedalVoltage[0] = 0.0f;
-			minPedalVoltage[0] = 3.3f;
-
-			printf("Click enter to complete calibration \r\n");
-			osThreadResume(APPSCalibrationHandle); // Resumes APPS calibration task
-
-			break; // Without break, other cases below will all execute until a break statement occurs
-		}
-		case 'x': // Space bar is clicked; end pedal calibration
-		{
-			centerPedalVoltage[0] = ((maxPedalVoltage[0] - minPedalVoltage[0]) / 2);
-			centerPedalVoltage[1] = ((maxPedalVoltage[1] - minPedalVoltage[1]) / 2);
-			osThreadSuspend(APPSCalibrationHandle);
-			printf("Ending Pedal Calibration...");
-			DISPLAY_CAN_MESSAGE = 1;
-			osThreadResume(PedalControlHandle);
-
-//			osThreadResume(DataDisplayHandle);
-			break;
-		}
-//		case 't': // Toggles display variable for displaying CAN messages
-//		{
-//			toggleCANRx = !toggleCANRx; // toggles the value of toggleCANRx; 0 -> 1, 1 -> 0
-//			break;
-//		}
-		#ifdef TEST_MODE
-			case 'p': // Allows values to be entered for CAN pedal control
-			{
-				BSP_LED_Toggle(LED_RED);
-			}
-		#endif
-
-		default: break;
-	}
-	serialByte = 0;
+    		charCommand = 0;
+    		commandIndex = 0;
+    		memset(commandBuffer, 0, sizeof(commandBuffer));   // Initialize commandBuffer to have all 0s
+    	}
+    }
+    else // Add the received byte to the commandBuffer
+    {
+    	commandBuffer[commandIndex++] = serialByte; // Post increment; writes to index 0 and then starts incrementing
+    }
 
 	 // Tells HAL to enable reception via interrupt
 	 // Tells HAL to continue waiting for another byte of data from the terminal
 	 // Commands do not work if this is commented out
 	 HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt;
 
-   osDelay(50);
+//   osDelay(50);
   }
   /* USER CODE END StartCommands */
 }
