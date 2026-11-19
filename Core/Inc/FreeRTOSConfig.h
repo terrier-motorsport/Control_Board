@@ -82,6 +82,7 @@ extern uint32_t SystemCoreClock;
 /* USER CODE BEGIN MESSAGE_BUFFER_LENGTH_TYPE */
 
 #define configUSE_STREAM_BUFFERS 1
+#define configUSE_TASK_NOTIFICATIONS 1
 
 
 /* Defaults to size_t for backward compatibility, but can be changed

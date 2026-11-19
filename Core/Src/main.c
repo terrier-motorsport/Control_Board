@@ -20,6 +20,7 @@
 #include "main.h"
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
+#include "task.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -140,12 +141,17 @@ const osMessageQueueAttr_t processCAN_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-// Variables for commands over serial
+///////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////// Serial Communication /////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////
+
 StreamBufferHandle_t UARTStreamBuffer;
 uint8_t receivedByte = 0; // variable to store byte received from the steam buffer
 char commandBuffer[COMMAND_BUFFER_SIZE]; // Buffer to contain commands
 
 uint8_t UART_RxByte;
+
+
 
 uint8_t DISPLAY_CAN_MESSAGE = 0;			// Turn this on/off if you want to print/ignore raw CAN Messages
 uint8_t DISPLAY_CAN_ERRORS = 0;			// Turn this on/off if you want to print/ignore CAN Errors
@@ -330,6 +336,7 @@ typedef enum
 } State;
 
 volatile State currentState = WATCHDOG_FAULTED; // init at fault on new boot, changed when safety conditions are met
+uint32_t staeFlags = 0; // Variable to hold all the states
 
 /*  More realistic states for future implementation
 
@@ -350,6 +357,10 @@ SystemState currentState = STATE_INIT;
 void setSysState(SystemState newState){
   currentState = newState;
 }
+
+// Add state flag
+
+// Clear State flag
 
 */
 
@@ -397,7 +408,7 @@ int main(void)
   HAL_NVIC_SetPriority(USART3_IRQn, 5, 0); // Configures interrupt priority for USART3
   HAL_NVIC_EnableIRQ(USART3_IRQn); // Enables the USART interrupt through NVIC
 
-  UARTStreamBuffer = xStreamBufferCreate(UART_BUFFER_SIZE, TRIGGER);
+  UARTStreamBuffer = xStreamBufferCreate(UART_BUFFER_SIZE, TRIGGER); // Creates stream buffer for UART commands
 
   /* USER CODE END 2 */
 
@@ -1014,6 +1025,8 @@ void ControlPedal(void *argument)
 {
   /* USER CODE BEGIN 5 */
 
+	uint32_t throttleCommandReceived;
+
 	HAL_ADC_Start(&hadc1); // Starts ADC1 on STM32
 //  osThreadSuspend(PedalControlHandle);
 	centerPedalVoltage[0] = ((maxPedalVoltage[0] - minPedalVoltage[0]) / 2);
@@ -1041,16 +1054,34 @@ void ControlPedal(void *argument)
 
 #ifdef TEST_MODE
 
-	  if(0) // Check if state is in serial CAN control
-	  {
+//	  if(0) // Check if state is in serial CAN control
+//	  {
+//		  if (xTaskNotifyWait(
+//		                  0,
+//		                  UINT32_MAX,
+//		                  &throttleCommandReceived, // The variable to pass
+//		                  portMAX_DELAY) == pdPASS)
+//		          {
+//		              // Process received throttle command
+//		              printf("Throttle Command Received \r\n");
+//		          }
+//
+//	  }
+//	  else // Use analog control
+//	  {
+	  if (xTaskNotifyWait(
+	                  0,
+	                  UINT32_MAX,
+	                  &throttleCommandReceived, // The variable to pass
+	                  portMAX_DELAY) == pdPASS)
+	          {
+	              // Process received throttle command
+	              printf("Throttle Command Received \r\n");
+	          }
 
-
-	  }
-	  else // Use analog control
-	  {
 	      inputPedalVoltage[0] = testPedalVoltage[0];
 	      inputPedalVoltage[1] = testPedalVoltage[1];
-	  }
+//	  }
 
 #else
 	  //	UBaseType_t highWaterMark;
@@ -1325,6 +1356,8 @@ void StartCommands(void *argument)
 //	char commandBuffer[COMMAND_BUFFER_SIZE]; // Buffer to contain commands
 	uint16_t commandIndex = 0; // Index for buffer
 
+	uint32_t throttleCommand = 0.0;
+
 	memset(commandBuffer, 0, sizeof(commandBuffer));   // Initialize commandBuffer to have all 0s
 
 	HAL_UART_Receive_IT(&hcom_uart[COM1], &serialByte, 1);  // Receives 1 byte of data and triggers interrupt;
@@ -1351,7 +1384,14 @@ void StartCommands(void *argument)
     	{
     		if (1) // Check if state is serial CAN control
     		{
+    			// Figure out throttle command
 
+    	        // Send throttle command to motor control task
+    	        xTaskNotify(
+    	            (TaskHandle_t)PedalControlHandle, // Task to notify
+    	            throttleCommand, // Value being sent to the receiving task
+    	            eSetValueWithOverwrite // Overwrite old notification when a new one is ready (maybe not)
+    	        );
     		}
     		commandIndex = 0;
     		printf("Multi-character input \r\n");
